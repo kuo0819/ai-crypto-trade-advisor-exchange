@@ -1,46 +1,33 @@
 # AI OKX 新手交易助手
 
-這是一個可部署到 GitHub Pages 的純前端網站，使用 OKX 公開市場資料 API 取得 USDT 永續合約 K 線，並用新手看得懂的方式輸出：
+這是一個可部署到 GitHub Pages 的靜態網站，使用 OKX 公開市場資料分析 USDT 永續合約與現貨交易對。
 
-- 現在做多、做空，還是等待
-- 進場區
-- 止損價
-- TP1 / TP2 / TP3
-- 風險報酬比
-- 建議名義倉位與保證金
-- 白話原因
-- 主流幣掃描器
+## 這版新增
 
-## 預設參數
+- 交易類型可切換：合約 / 現貨
+- OKX 下單參數對照：照著 OKX 下單畫面填欄位
+- 合約參數：逐倉、槓桿、開多/開空、限價、數量、止盈止損、移動止盈止損
+- 現貨參數：買入/賣出、不做空、買入金額、止損、分批止盈
+- 主流幣掃描器會顯示 OKX 動作：開多、開空、不下單、現貨不買/賣出
 
-- 交易所：OKX
-- 市場：USDT 永續合約，例如 `BTC-USDT-SWAP`
-- K 線週期：4H
+## 新手預設
+
+- K 線：4H
 - 單筆風險：1%
-- 槓桿：2x
-- 最低風險報酬比：2
-- 均線：SMA20 / SMA50
-- RSI：14
-- ATR：14
+- 合約槓桿：2x
+- 合約倉位：逐倉
+- 委託方式：限價委託
+- 現貨：不使用槓桿，不做空
 
 ## GitHub Pages 部署
 
-1. 建立 GitHub repository。
-2. 上傳這些檔案到 repository 根目錄：
-   - `index.html`
-   - `styles.css`
-   - `app.js`
-   - `.nojekyll`
-   - `404.html`
-3. 到 repository 的 `Settings` → `Pages`。
-4. Source 選 `Deploy from a branch`。
-5. Branch 選 `main`，資料夾選 `/root`。
-6. 儲存後等待 GitHub 產生網址。
+1. 建立 GitHub repository
+2. 將本資料夾全部檔案上傳到 repository 根目錄
+3. 到 Settings → Pages
+4. Source 選 Deploy from a branch
+5. Branch 選 main，資料夾選 root
+6. 等待 GitHub 產生網址
 
-## 注意事項
+## 風險提醒
 
-- 這個網站不需要 API Key。
-- 這個網站不會自動下單。
-- 如果瀏覽器或網路阻擋 OKX API，可能會顯示連線失敗。
-- 這是交易輔助工具，不保證獲利。
-- 合約與槓桿會放大虧損，請務必使用止損。
+這是技術分析輔助工具，不是投資建議，也不能保證獲利。合約與槓桿會放大虧損。新手請遵守：沒有止損不進場、單筆最多虧帳戶 1%、看不懂就不要做。

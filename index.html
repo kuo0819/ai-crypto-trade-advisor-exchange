@@ -26,9 +26,9 @@
 
     <section class="hero-grid">
       <div class="hero-copy">
-        <p class="eyebrow">新手模式｜OKX USDT 永續合約</p>
+        <p class="eyebrow">新手模式｜OKX 合約 / 現貨參數對照</p>
         <h1>打開網站，選幣種，直接看現在該不該交易。</h1>
-        <p>網站會用 OKX 公開 K 線資料計算趨勢、RSI、ATR、支撐壓力與風險報酬比，然後用白話告訴你：做多、做空，還是等待。</p>
+        <p>網站會用 OKX 公開 K 線資料計算趨勢、RSI、ATR、支撐壓力與風險報酬比，然後把結果翻成 OKX 下單頁面看得懂的參數：合約怎麼填、現貨怎麼填。</p>
         <div class="notice">
           <b>新手原則：</b>看不懂就不做；沒有止損就不進場；每筆最多虧帳戶 1%。
         </div>
@@ -36,7 +36,15 @@
 
       <div class="control-card">
         <div class="field">
-          <label for="symbolSelect">選擇 OKX 合約幣種</label>
+          <label for="marketSelect">交易類型</label>
+          <select id="marketSelect">
+            <option value="swap" selected>合約｜USDT 永續，可做多 / 做空</option>
+            <option value="spot">現貨｜只能買入 / 賣出，不做空</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="symbolSelect">選擇 OKX 幣種</label>
           <select id="symbolSelect"></select>
         </div>
 
@@ -144,6 +152,34 @@
       </article>
     </section>
 
+
+
+    <section class="card okx-ticket-card">
+      <div class="card-head">
+        <span>OKX 下單參數對照</span>
+        <small>照著 OKX 下單畫面核對，不懂就不要下單</small>
+      </div>
+      <div class="ticket-note">
+        左邊是你截圖裡的「合約」欄位；右邊是「現貨」欄位。網站會把進場、止損、止盈、數量與槓桿翻成你在 OKX 看到的名稱。
+      </div>
+      <div class="okx-ticket-grid">
+        <article class="ticket-box contract">
+          <div class="ticket-title">
+            <b>合約參數</b>
+            <span>USDT 永續｜可開多 / 開空</span>
+          </div>
+          <div id="contractParams" class="param-list"></div>
+        </article>
+        <article class="ticket-box spot">
+          <div class="ticket-title">
+            <b>現貨參數</b>
+            <span>只能買入 / 賣出，不能真正做空</span>
+          </div>
+          <div id="spotParams" class="param-list"></div>
+        </article>
+      </div>
+    </section>
+
     <section class="card beginner-guide">
       <div class="card-head">
         <span>網站怎麼讀？</span>
@@ -199,6 +235,7 @@
               <th>止損</th>
               <th>TP2</th>
               <th>R:R</th>
+              <th>OKX 動作</th>
               <th>原因</th>
             </tr>
           </thead>

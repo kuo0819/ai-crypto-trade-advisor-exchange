@@ -1,4 +1,4 @@
-const SYMBOLS = [
+const CONTRACT_SYMBOLS = [
   ['BTC-USDT-SWAP','Bitcoin'], ['ETH-USDT-SWAP','Ethereum'], ['SOL-USDT-SWAP','Solana'],
   ['XRP-USDT-SWAP','XRP'], ['DOGE-USDT-SWAP','Dogecoin'], ['ADA-USDT-SWAP','Cardano'],
   ['AVAX-USDT-SWAP','Avalanche'], ['LINK-USDT-SWAP','Chainlink'], ['DOT-USDT-SWAP','Polkadot'],
@@ -8,6 +8,7 @@ const SYMBOLS = [
   ['SUI-USDT-SWAP','Sui'], ['TON-USDT-SWAP','Toncoin']
 ];
 
+const SPOT_SYMBOLS = CONTRACT_SYMBOLS.map(([id, name]) => [id.replace('-SWAP', ''), name]);
 const $ = id => document.getElementById(id);
 let chart;
 let lastAnalysis = null;
@@ -22,6 +23,10 @@ function fmtUSD(n){ return Number.isFinite(n) ? `${fmtPrice(n)} USDT` : '—'; }
 function fmtPct(n){ return Number.isFinite(n) ? `${n>=0?'+':''}${n.toFixed(2)}%` : '—'; }
 function clamp(n,min,max){ return Math.max(min, Math.min(max,n)); }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+function toSpotInstId(instId){ return instId.replace('-SWAP',''); }
+function toSwapInstId(instId){ return instId.endsWith('-SWAP') ? instId : `${instId}-SWAP`; }
+function baseCoin(instId){ return instId.split('-')[0]; }
+function currentSymbols(){ return $('marketSelect').value === 'spot' ? SPOT_SYMBOLS : CONTRACT_SYMBOLS; }
 
 function setStatus(msg, type='info'){
   const s=$('status'); s.textContent=msg;
@@ -105,7 +110,7 @@ function volumeRatio(candles){
   return avg ? last/avg : NaN;
 }
 
-function makePlan(side, price, atrV, lev, account, riskPct, minRR, lvls){
+function makePlan(side, price, atrV, lev, account, riskPct, minRR, lvls, market='swap'){
   if(side==='LONG'){
     const entryMid = price;
     const entryLow = price - atrV*0.25;
@@ -114,7 +119,7 @@ function makePlan(side, price, atrV, lev, account, riskPct, minRR, lvls){
     const atrStop = entryMid - atrV*1.25;
     const stop = Math.min(structureStop, atrStop);
     const risk = Math.max(entryMid-stop, atrV*0.8);
-    return finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, account, riskPct, minRR);
+    return finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, account, riskPct, minRR, market);
   }
   if(side==='SHORT'){
     const entryMid = price;
@@ -124,26 +129,30 @@ function makePlan(side, price, atrV, lev, account, riskPct, minRR, lvls){
     const atrStop = entryMid + atrV*1.25;
     const stop = Math.max(structureStop, atrStop);
     const risk = Math.max(stop-entryMid, atrV*0.8);
-    return finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, account, riskPct, minRR);
+    return finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, account, riskPct, minRR, market);
   }
   return null;
 }
-function finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, account, riskPct, minRR){
+function finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, account, riskPct, minRR, market){
   const dir = side==='LONG' ? 1 : -1;
   const tp1 = entryMid + dir*risk;
   const tp2 = entryMid + dir*risk*2;
   const tp3 = entryMid + dir*risk*3;
   const riskCash = account*riskPct;
   const qtyCoin = risk > 0 ? riskCash / risk : 0;
-  const notional = qtyCoin * entryMid;
+  let notional = qtyCoin * entryMid;
+  if(market === 'spot') notional = Math.min(notional, account * 0.35); // 新手現貨避免一次買太滿
   const margin = lev > 0 ? notional / lev : notional;
-  return {side, entryLow, entryHigh, entryMid, stop, tp1, tp2, tp3, risk, rr: 2, qtyCoin, notional, margin, minRR};
+  const stopPct = Math.abs(entryMid-stop)/entryMid*100;
+  const trailingCallback = clamp(Math.round((stopPct * 0.7) * 10) / 10, 2, 10);
+  return {side, entryLow, entryHigh, entryMid, stop, tp1, tp2, tp3, risk, rr: 2, qtyCoin, notional, margin, minRR, stopPct, trailingCallback};
 }
 
 function analyzeFromCandles(instId, candles, ticker={}){
+  const market = $('marketSelect').value;
   const account = Number($('accountInput').value || 1000);
   const riskPct = Number($('riskSelect').value || .01);
-  const lev = Number($('leverageSelect').value || 2);
+  const lev = market === 'spot' ? 1 : Number($('leverageSelect').value || 2);
   const minRR = Number($('rrSelect').value || 2);
   const mode = $('modeSelect').value;
   const closes = candles.map(c=>c.close);
@@ -183,7 +192,14 @@ function analyzeFromCandles(instId, candles, ticker={}){
   if(short>=threshold && short>=long+10 && rsi14>25) { side='SHORT'; label='可以觀察做空'; grade='short'; }
   if(Math.abs(long-short)<10){ side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('多空分數太接近，代表方向不夠明確。'); }
 
-  let plan = side==='WAIT' ? null : makePlan(side, price, atr14, lev, account, riskPct, minRR, lvls);
+  if(market === 'spot' && side === 'SHORT'){
+    label = '現貨偏空：不買，持倉可考慮賣出';
+    grade = 'short';
+    warnings.push('現貨不能真正做空；偏空時新手不要開新倉買入。');
+  }
+
+  let plan = side==='WAIT' ? null : makePlan(side, price, atr14, lev, account, riskPct, minRR, lvls, market);
+  if(market === 'spot' && side === 'SHORT') plan = makePlan('SHORT', price, atr14, 1, account, riskPct, minRR, lvls, market);
   if(plan){
     const rrOk = plan.rr >= minRR;
     if(!rrOk){ side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push(`風險報酬比低於 ${minRR}，不符合新手交易條件。`); plan=null; }
@@ -193,7 +209,7 @@ function analyzeFromCandles(instId, candles, ticker={}){
   if(side==='WAIT' && reasons.length===0) reasons.push('目前沒有明確方向，先等待比較安全。');
   warnings.forEach(w=>{ if(!reasons.includes(w)) reasons.push(w); });
 
-  return {instId, candles, ticker, price, sma20, sma50, rsi14, atr14, atrPct, distSma20, trend10, trend30, lvls, volR, long, short, side, label, grade, plan, reasons, s20, s50, account, riskPct, lev, minRR};
+  return {market, instId, candles, ticker, price, sma20, sma50, rsi14, atr14, atrPct, distSma20, trend10, trend30, lvls, volR, long, short, side, label, grade, plan, reasons, s20, s50, account, riskPct, lev, minRR};
 }
 
 async function analyzeSelected(){
@@ -213,9 +229,7 @@ async function analyzeSelected(){
   }finally{ setBusy(false); }
 }
 
-function setBusy(b){
-  ['analyzeBtn','scanBtn','refreshBtn'].forEach(id=>$(id).disabled=b);
-}
+function setBusy(b){ ['analyzeBtn','scanBtn','refreshBtn'].forEach(id=>$(id).disabled=b); }
 
 function renderAnalysis(a){
   $('updatedAt').textContent = new Date().toLocaleString('zh-TW');
@@ -228,13 +242,15 @@ function renderAnalysis(a){
   $('longBar').style.width = `${a.long}%`;
   $('shortBar').style.width = `${a.short}%`;
   renderPlan(a);
+  renderOkxParams(a);
   renderReasons(a.reasons);
   renderMetrics(a);
   renderChart(a);
 }
 function simpleText(a){
+  if(a.market==='spot' && a.side==='SHORT') return '現貨沒有做空按鈕。偏空時不要買；如果你已經持有，可以參考現貨參數分批賣出或設止損。';
   if(a.side==='LONG') return '目前偏多，可以等待價格落在進場區附近，再用止損控制風險。不要看到綠色就重倉追高。';
-  if(a.side==='SHORT') return '目前偏空，可以觀察做空，但這是合約交易，新手一定要設好止損，避免反彈爆倉。';
+  if(a.side==='SHORT') return '目前偏空，可以觀察合約做空；新手一定要用逐倉和止損，避免反彈造成大虧。';
   return '目前建議等待，不交易。方向不夠明確或風險條件不漂亮時，空手就是最安全的策略。';
 }
 function renderPlan(a){
@@ -244,7 +260,8 @@ function renderPlan(a){
     return;
   }
   const p=a.plan;
-  $('sideOut').textContent = p.side==='LONG' ? '做多 Long' : '做空 Short';
+  let sideText = p.side==='LONG' ? (a.market==='spot'?'現貨買入 Buy':'做多 Long') : (a.market==='spot'?'現貨賣出 / 不買':'做空 Short');
+  $('sideOut').textContent = sideText;
   $('entryOut').textContent = `${fmtPrice(p.entryLow)} - ${fmtPrice(p.entryHigh)}`;
   $('stopOut').textContent = fmtUSD(p.stop);
   $('tp1Out').textContent = fmtUSD(p.tp1);
@@ -252,14 +269,75 @@ function renderPlan(a){
   $('tp3Out').textContent = fmtUSD(p.tp3);
   $('rrOut').textContent = `約 1 : ${p.rr.toFixed(1)}`;
   $('positionOut').textContent = `${fmtPrice(p.notional)} USDT 名義倉位`;
-  $('marginOut').textContent = `${fmtPrice(p.margin)} USDT，${a.lev}x`;
+  $('marginOut').textContent = a.market==='spot' ? '現貨無槓桿' : `${fmtPrice(p.margin)} USDT，${a.lev}x`;
 }
-function renderReasons(reasons){
-  $('reasons').innerHTML = reasons.map(r=>`<li>${escapeHtml(r)}</li>`).join('');
+function paramRows(rows){
+  return rows.map(([k,v,hint])=>`<div class="param-row"><small>${escapeHtml(k)}</small><strong>${escapeHtml(v)}</strong>${hint?`<em>${escapeHtml(hint)}</em>`:''}</div>`).join('');
 }
+function renderOkxParams(a){
+  const p = a.plan;
+  const swapId = toSwapInstId(a.instId);
+  const spotId = toSpotInstId(a.instId);
+  if(!p){
+    const waitRows = [
+      ['目前動作','等待，不下單','OKX 任何欄位都先不要填'],
+      ['原因','訊號不夠清楚','空手也是交易策略'],
+      ['提醒','等網站出現做多 / 做空，再回來看參數','不要為了交易而交易']
+    ];
+    $('contractParams').innerHTML = paramRows(waitRows);
+    $('spotParams').innerHTML = paramRows(waitRows);
+    return;
+  }
+
+  const contractAction = p.side === 'LONG' ? '開多' : '開空';
+  const contractRows = [
+    ['交易對', swapId, 'OKX 合約搜尋這個名稱'],
+    ['頁籤', '交易 → 開倉', '不是平倉'],
+    ['倉位模式', '逐倉', '新手不要用全倉，避免整個帳戶被拖下水'],
+    ['方向', contractAction, p.side==='LONG'?'綠色按鈕':'紅色按鈕'],
+    ['槓桿', `${a.lev}x`, '新手建議 1x - 2x，最多不要超過 3x'],
+    ['委託類型', '限價委託', '不要市價追單，等價格到進場區'],
+    ['價格欄', `${fmtPrice(p.entryLow)} - ${fmtPrice(p.entryHigh)}`, '價格接近這區間再掛單'],
+    ['數量單位', 'USDT', '截圖數量欄右側選 USDT'],
+    ['數量', `${fmtPrice(p.notional)} USDT`, '這是名義倉位，不是保證金'],
+    ['預估保證金', `${fmtPrice(p.margin)} USDT`, '實際以 OKX 顯示為準'],
+    ['止盈止損', '勾選', '一定要設定，不要裸單'],
+    ['止損觸發價', fmtPrice(p.stop), '委託價建議選市價'],
+    ['TP1 止盈', `${fmtPrice(p.tp1)}｜出 30%`, '先保護利潤'],
+    ['TP2 止盈', `${fmtPrice(p.tp2)}｜再出 30%`, '達到後可把止損移到進場價'],
+    ['TP3 止盈', `${fmtPrice(p.tp3)}｜出 40%`, '最後一段吃趨勢'],
+    ['移動止盈止損', `回調幅度 ${p.trailingCallback}%`, '不懂可以先不用，會用後再開']
+  ];
+
+  const spotRows = p.side === 'LONG' ? [
+    ['交易對', spotId, 'OKX 現貨搜尋這個名稱'],
+    ['操作', '買入', '現貨沒有開多/開空，只有買入/賣出'],
+    ['委託類型', '限價委託', '新手不要市價追高'],
+    ['買入價格', `${fmtPrice(p.entryLow)} - ${fmtPrice(p.entryHigh)}`, '價格到這區間再買'],
+    ['買入金額', `${fmtPrice(Math.min(p.notional, a.account*0.35))} USDT`, '新手單一幣最多先用帳戶 35% 以內'],
+    ['止損價', fmtPrice(p.stop), '跌破代表判斷錯誤'],
+    ['TP1 賣出', `${fmtPrice(p.tp1)}｜賣 30%`, '可用限價賣單'],
+    ['TP2 賣出', `${fmtPrice(p.tp2)}｜賣 30%`, '分批收利潤'],
+    ['TP3 賣出', `${fmtPrice(p.tp3)}｜賣 40%`, '留最後一段'],
+    ['現貨提醒', '不能做空', '偏空時不要買，已持倉才考慮賣出']
+  ] : [
+    ['交易對', spotId, 'OKX 現貨搜尋這個名稱'],
+    ['操作', '不買 / 有持倉才賣出', '現貨不能真正做空'],
+    ['委託類型', '限價賣出或止損賣出', '沒有持倉就不要操作'],
+    ['賣出參考價', fmtPrice(p.entryMid), '偏空時不要追買'],
+    ['風險線', fmtPrice(p.stop), '若你持有現貨，反彈過這裡代表空方減弱'],
+    ['下方目標 1', `${fmtPrice(p.tp1)}｜可觀察`, '這不是做空獲利單，是提醒下方支撐'],
+    ['下方目標 2', `${fmtPrice(p.tp2)}｜可觀察`, '現貨新手以保護本金為主'],
+    ['下方目標 3', `${fmtPrice(p.tp3)}｜可觀察`, '不要把現貨當合約做空'],
+    ['現貨提醒', '偏空 = 不買', '想做空請切到合約並用逐倉止損']
+  ];
+  $('contractParams').innerHTML = paramRows(contractRows);
+  $('spotParams').innerHTML = paramRows(spotRows);
+}
+function renderReasons(reasons){ $('reasons').innerHTML = reasons.map(r=>`<li>${escapeHtml(r)}</li>`).join(''); }
 function renderMetrics(a){
   const rows = [
-    ['現價', fmtUSD(a.price)], ['24H 漲跌', fmtPct(a.ticker.change24h)],
+    ['交易類型', a.market==='spot'?'現貨':'USDT 永續合約'], ['現價', fmtUSD(a.price)], ['24H 漲跌', fmtPct(a.ticker.change24h)],
     ['SMA20', fmtUSD(a.sma20)], ['SMA50', fmtUSD(a.sma50)],
     ['RSI14', Number.isFinite(a.rsi14)?a.rsi14.toFixed(1):'—'], ['ATR14', `${fmtUSD(a.atr14)}｜${a.atrPct.toFixed(2)}%`],
     ['支撐', fmtUSD(a.lvls.support)], ['壓力', fmtUSD(a.lvls.resistance)],
@@ -289,13 +367,14 @@ function renderChart(a){
 async function scanSymbols(){
   setBusy(true);
   const bar = $('barSelect').value;
+  const symbols = currentSymbols();
   const body = $('scanBody');
   body.innerHTML = '';
-  setStatus('正在掃描 OKX 主流幣，請稍候...');
+  setStatus(`正在掃描 OKX ${$('marketSelect').value==='spot'?'現貨':'合約'}主流幣，請稍候...`);
   const results=[];
-  for(let i=0;i<SYMBOLS.length;i++){
-    const [instId,name]=SYMBOLS[i];
-    setStatus(`掃描中 ${i+1}/${SYMBOLS.length}：${instId}`);
+  for(let i=0;i<symbols.length;i++){
+    const [instId,name]=symbols[i];
+    setStatus(`掃描中 ${i+1}/${symbols.length}：${instId}`);
     try{
       const [candles,ticker] = await Promise.all([getCandles(instId, bar, 200), getTicker(instId)]);
       const a = analyzeFromCandles(instId, candles, ticker);
@@ -318,25 +397,38 @@ async function scanSymbols(){
   setBusy(false);
 }
 function renderScanRow(r,idx){
-  if(r.error) return `<tr><td>${idx+1}</td><td>${r.instId}</td><td colspan="7" class="negative">資料失敗：${escapeHtml(r.error)}</td></tr>`;
+  if(r.error) return `<tr><td>${idx+1}</td><td>${r.instId}</td><td colspan="8" class="negative">資料失敗：${escapeHtml(r.error)}</td></tr>`;
   const tagClass = r.side==='LONG'?'long':r.side==='SHORT'?'short':'wait';
   const p=r.plan;
   const firstReason = r.reasons?.[0] || '—';
+  const action = r.market==='spot' ? (r.side==='LONG'?'買入':'不買 / 持倉賣出') : (r.side==='LONG'?'開多':r.side==='SHORT'?'開空':'不下單');
   return `<tr data-inst="${r.instId}">
     <td>${idx+1}</td><td><b>${r.instId}</b><br><span class="muted">${r.name}</span></td>
     <td><span class="tag ${tagClass}">${r.label}</span></td><td>${fmtUSD(r.price)}</td>
     <td>${p?`${fmtPrice(p.entryLow)} - ${fmtPrice(p.entryHigh)}`:'—'}</td><td>${p?fmtUSD(p.stop):'—'}</td><td>${p?fmtUSD(p.tp2):'—'}</td>
-    <td>${p?`1:${p.rr.toFixed(1)}`:'—'}</td><td>${escapeHtml(firstReason)}</td>
+    <td>${p?`1:${p.rr.toFixed(1)}`:'—'}</td><td>${action}</td><td>${escapeHtml(firstReason)}</td>
   </tr>`;
 }
 function escapeHtml(str){ return String(str).replace(/[&<>'"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 
+function updateSymbolOptions(){
+  const oldBase = baseCoin($('symbolSelect').value || 'BTC-USDT-SWAP');
+  const symbols = currentSymbols();
+  $('symbolSelect').innerHTML = symbols.map(([id,name])=>`<option value="${id}">${id}｜${name}</option>`).join('');
+  const match = symbols.find(([id])=>baseCoin(id)===oldBase);
+  if(match) $('symbolSelect').value = match[0];
+  const isSpot = $('marketSelect').value === 'spot';
+  $('leverageSelect').disabled = isSpot;
+  $('leverageSelect').title = isSpot ? '現貨沒有槓桿' : '';
+}
 function init(){
-  $('symbolSelect').innerHTML = SYMBOLS.map(([id,name])=>`<option value="${id}">${id}｜${name}</option>`).join('');
+  updateSymbolOptions();
+  $('marketSelect').addEventListener('change',()=>{ updateSymbolOptions(); if(lastAnalysis) analyzeSelected(); });
+  $('symbolSelect').addEventListener('change',()=>{ if(lastAnalysis) analyzeSelected(); });
   $('analyzeBtn').addEventListener('click', analyzeSelected);
   $('refreshBtn').addEventListener('click', analyzeSelected);
   $('scanBtn').addEventListener('click', scanSymbols);
-  ['accountInput','riskSelect','leverageSelect','rrSelect','modeSelect'].forEach(id=>$(id).addEventListener('change',()=>{ if(lastAnalysis) analyzeSelected(); }));
-  setStatus('準備完成。建議新手先用 4H、1% 風險、2x 槓桿。');
+  ['accountInput','riskSelect','leverageSelect','rrSelect','modeSelect','barSelect'].forEach(id=>$(id).addEventListener('change',()=>{ if(lastAnalysis) analyzeSelected(); }));
+  setStatus('準備完成。合約建議用逐倉、4H、1% 風險、2x 槓桿；現貨沒有做空，偏空就不買。');
 }
 init();
