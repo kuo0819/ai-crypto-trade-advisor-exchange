@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI OKX 下單參數助手</title>
+  <title>AI OKX 工業風下單參數助手</title>
   <meta name="description" content="OKX 新手下單參數助手：合約與現貨分開顯示，直接對應 OKX 欄位、進場、止損、止盈、倉位與風險。" />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
@@ -14,18 +14,18 @@
     <div class="brand">
       <div class="logo">OKX</div>
       <div>
-        <strong>AI OKX 下單參數助手</strong>
-        <span>先看能不能做，再照 OKX 欄位填參數</span>
+        <strong>AI OKX 工業風下單參數助手</strong>
+        <span>Command Center｜先看結論，再照欄位下單</span>
       </div>
     </div>
-    <button id="refreshBtn" class="ghost">重新分析</button>
+    <button id="refreshBtn" class="ghost">↻ 重新分析</button>
   </header>
 
   <main class="app-shell">
     <section class="settings-card">
       <div class="section-title compact">
         <div>
-          <span>Step 1</span>
+          <span>Control</span>
           <h2>選擇交易設定</h2>
         </div>
         <small>新手預設：合約、4H、1% 風險、2x 槓桿</small>
@@ -100,7 +100,7 @@
       <article class="decision-panel">
         <div class="section-title compact">
           <div>
-            <span>Step 2</span>
+            <span>Signal</span>
             <h2>現在到底要不要做？</h2>
           </div>
           <small id="updatedAt">尚未分析</small>
@@ -117,7 +117,7 @@
       <article class="risk-panel">
         <div class="section-title compact">
           <div>
-            <span>Step 3</span>
+            <span>Risk</span>
             <h2>這筆最多會虧多少？</h2>
           </div>
         </div>
@@ -139,7 +139,7 @@
     <section class="ticket-card primary-ticket">
       <div class="section-title">
         <div>
-          <span>Step 4</span>
+          <span>Ticket</span>
           <h2 id="mainTicketTitle">OKX 下單欄位怎麼填</h2>
           <p>這裡只放你在 OKX 下單畫面需要填的欄位。照順序核對，沒有出現做多/做空/買入就不要下單。</p>
         </div>
