@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Crypto Trade Advisor｜交易所 K 線版</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="hero">
+    <nav class="nav">
+      <div class="brand">
+        <span class="logo">AI</span>
+        <div>
+          <strong>Crypto Trade Advisor</strong>
+          <small>Binance → Bybit → OKX 交易所 K 線 fallback</small>
+        </div>
+      </div>
+      <button id="refreshBtn" class="ghost">重新分析</button>
+    </nav>
+
+    <section class="hero-grid">
+      <div>
+        <p class="eyebrow">交易輔助工具，不是保證獲利系統</p>
+        <h1>選擇幣種後，快速判斷是否適合進場、買在哪、停損與止盈在哪。</h1>
+        <p class="lead">新版不再依賴 CoinGecko。系統會優先抓 Binance K 線，失敗時自動改抓 Bybit，再失敗則改抓 OKX，並用趨勢、SMA、RSI、ATR、成交量、支撐壓力與風險報酬比產生交易計畫。</p>
+      </div>
+      <div class="control-card">
+        <label>選擇幣種</label>
+        <select id="coinSelect"></select>
+        <div class="split">
+          <div>
+            <label>市場類型</label>
+            <select id="marketSelect">
+              <option value="spot" selected>現貨 Spot</option>
+              <option value="futures">合約 Futures / Swap</option>
+            </select>
+          </div>
+          <div>
+            <label>K 線週期</label>
+            <select id="intervalSelect">
+              <option value="1h">1H｜短線</option>
+              <option value="4h" selected>4H｜波段</option>
+              <option value="1d">1D｜中期</option>
+            </select>
+          </div>
+        </div>
+        <div class="split">
+          <div>
+            <label>帳戶資金 USDT</label>
+            <input id="accountInput" type="number" min="10" step="10" value="1000" />
+          </div>
+          <div>
+            <label>單筆風險</label>
+            <select id="riskSelect">
+              <option value="0.005">0.5%</option>
+              <option value="0.01" selected>1%</option>
+              <option value="0.02">2%</option>
+            </select>
+          </div>
+        </div>
+        <button id="analyzeBtn" class="primary">分析這個幣種</button>
+        <button id="scanBtn" class="ghost full">掃描 20 個主流幣</button>
+      </div>
+    </section>
+  </header>
+
+  <main>
+    <section id="status" class="status">正在初始化幣種清單...</section>
+
+    <section class="result-grid">
+      <article class="decision card">
+        <div class="section-title">
+          <span>AI 決策</span>
+          <small id="lastUpdated">—</small>
+        </div>
+        <div id="decisionBadge" class="badge neutral">等待分析</div>
+        <h2 id="coinTitle">請先選擇幣種</h2>
+        <p id="decisionText">系統會在這裡顯示是否可以進場與原因。</p>
+        <div class="score-wrap">
+          <div>
+            <small>Long 分數</small>
+            <div class="bar"><span id="longBar"></span></div>
+            <b id="longScore">0</b>
+          </div>
+          <div>
+            <small>Short 分數</small>
+            <div class="bar"><span id="shortBar"></span></div>
+            <b id="shortScore">0</b>
+          </div>
+        </div>
+      </article>
+
+      <article class="card setup-card">
+        <div class="section-title"><span>進出場計畫</span><small>以 USDT 計價</small></div>
+        <div class="setup-grid">
+          <div><small>建議方向</small><strong id="sideOut">—</strong></div>
+          <div><small>理想進場</small><strong id="entryOut">—</strong></div>
+          <div><small>止損 Stop</small><strong id="stopOut">—</strong></div>
+          <div><small>止盈 TP1</small><strong id="tp1Out">—</strong></div>
+          <div><small>止盈 TP2</small><strong id="tp2Out">—</strong></div>
+          <div><small>止盈 TP3</small><strong id="tp3Out">—</strong></div>
+          <div><small>風險報酬</small><strong id="rrOut">—</strong></div>
+          <div><small>建議倉位</small><strong id="positionOut">—</strong></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="card chart-card">
+      <div class="section-title">
+        <span>價格走勢與技術線</span>
+        <small id="chartSource">SMA20 / SMA50 / Entry / Stop / TP</small>
+      </div>
+      <canvas id="priceChart" height="120"></canvas>
+    </section>
+
+    <section class="grid-2">
+      <article class="card">
+        <div class="section-title"><span>技術指標</span><small>交易所 K 線計算</small></div>
+        <div id="metrics" class="metrics"></div>
+      </article>
+      <article class="card">
+        <div class="section-title"><span>判斷理由</span><small>進場前必看</small></div>
+        <ul id="reasons" class="reasons"></ul>
+      </article>
+    </section>
+
+    <section class="card scanner-card">
+      <div class="section-title">
+        <span>20 個主流幣快速掃描</span>
+        <small>點擊「掃描」後依 AI 分數排序；點擊任一列可切換幣種</small>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>幣種</th>
+              <th>資料源</th>
+              <th>現價</th>
+              <th>24h</th>
+              <th>AI 方向</th>
+              <th>Long</th>
+              <th>Short</th>
+              <th>進場</th>
+              <th>止損</th>
+              <th>TP2</th>
+            </tr>
+          </thead>
+          <tbody id="scannerBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="disclaimer">
+      <strong>風險提醒：</strong>本網站只提供技術分析與風險控管參考，不構成投資建議。加密貨幣價格可能劇烈波動，合約與槓桿會放大虧損。任何 AI 訊號都必須搭配你的交易紀律、停損與倉位控管使用。
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
