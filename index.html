@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI OKX 新手交易助手</title>
+  <meta name="description" content="OKX USDT 永續合約新手交易輔助網站：判斷做多、做空、等待，並計算進場、止損、止盈與倉位。" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="hero">
+    <nav class="nav">
+      <div class="brand">
+        <div class="logo">OKX</div>
+        <div>
+          <strong>AI OKX 新手交易助手</strong>
+          <span>看得懂的進場、止損、止盈與倉位建議</span>
+        </div>
+      </div>
+      <div class="nav-actions">
+        <button id="refreshBtn" class="ghost">重新分析</button>
+      </div>
+    </nav>
+
+    <section class="hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">新手模式｜OKX USDT 永續合約</p>
+        <h1>打開網站，選幣種，直接看現在該不該交易。</h1>
+        <p>網站會用 OKX 公開 K 線資料計算趨勢、RSI、ATR、支撐壓力與風險報酬比，然後用白話告訴你：做多、做空，還是等待。</p>
+        <div class="notice">
+          <b>新手原則：</b>看不懂就不做；沒有止損就不進場；每筆最多虧帳戶 1%。
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="field">
+          <label for="symbolSelect">選擇 OKX 合約幣種</label>
+          <select id="symbolSelect"></select>
+        </div>
+
+        <div class="split">
+          <div class="field">
+            <label for="barSelect">K 線週期</label>
+            <select id="barSelect">
+              <option value="1H">1H｜短線，訊號多但雜訊大</option>
+              <option value="4H" selected>4H｜新手建議</option>
+              <option value="1D">1D｜波段，訊號較慢</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="modeSelect">交易模式</label>
+            <select id="modeSelect">
+              <option value="conservative" selected>保守｜等條件完整</option>
+              <option value="normal">一般｜訊號較快</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="field">
+            <label for="accountInput">帳戶資金 USDT</label>
+            <input id="accountInput" type="number" value="1000" min="10" step="10" />
+          </div>
+          <div class="field">
+            <label for="riskSelect">單筆最大虧損</label>
+            <select id="riskSelect">
+              <option value="0.005">0.5%｜非常保守</option>
+              <option value="0.01" selected>1%｜新手建議</option>
+              <option value="0.02">2%｜風險較高</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="field">
+            <label for="leverageSelect">槓桿倍數</label>
+            <select id="leverageSelect">
+              <option value="1">1x｜最保守</option>
+              <option value="2" selected>2x｜新手上限建議</option>
+              <option value="3">3x｜需嚴格止損</option>
+              <option value="5">5x｜不建議新手</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="rrSelect">最低風險報酬比</label>
+            <select id="rrSelect">
+              <option value="1.5">1.5</option>
+              <option value="2" selected>2｜新手建議</option>
+              <option value="2.5">2.5｜更嚴格</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="analyzeBtn" class="primary">分析這個幣種</button>
+        <button id="scanBtn" class="secondary">掃描主流幣，找機會</button>
+      </div>
+    </section>
+  </header>
+
+  <main>
+    <section id="status" class="status">準備完成，請按「分析這個幣種」。</section>
+
+    <section class="top-grid">
+      <article class="card decision-card">
+        <div class="card-head">
+          <span>目前建議</span>
+          <small id="updatedAt">尚未分析</small>
+        </div>
+        <div id="decisionBadge" class="decision wait">等待分析</div>
+        <h2 id="symbolTitle">請先選擇幣種</h2>
+        <p id="simpleConclusion">網站會在這裡用白話告訴你現在能不能做。</p>
+        <div class="score-box">
+          <div>
+            <span>做多分數</span>
+            <b id="longScore">0</b>
+            <div class="bar"><i id="longBar"></i></div>
+          </div>
+          <div>
+            <span>做空分數</span>
+            <b id="shortScore">0</b>
+            <div class="bar"><i id="shortBar"></i></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card plan-card">
+        <div class="card-head">
+          <span>新手交易參數</span>
+          <small>下單前照著核對</small>
+        </div>
+        <div class="plan-grid">
+          <div><small>方向</small><strong id="sideOut">—</strong></div>
+          <div><small>進場區</small><strong id="entryOut">—</strong></div>
+          <div><small>止損</small><strong id="stopOut">—</strong></div>
+          <div><small>TP1 出 30%</small><strong id="tp1Out">—</strong></div>
+          <div><small>TP2 出 30%</small><strong id="tp2Out">—</strong></div>
+          <div><small>TP3 出 40%</small><strong id="tp3Out">—</strong></div>
+          <div><small>風險報酬</small><strong id="rrOut">—</strong></div>
+          <div><small>建議倉位</small><strong id="positionOut">—</strong></div>
+          <div><small>需要保證金</small><strong id="marginOut">—</strong></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="card beginner-guide">
+      <div class="card-head">
+        <span>網站怎麼讀？</span>
+        <small>新手版說明</small>
+      </div>
+      <div class="guide-grid">
+        <div><b>綠色</b><p>可以觀察做多。價格往上比較有利，但仍要等進場區和止損設定。</p></div>
+        <div><b>紅色</b><p>可以觀察做空。價格往下比較有利，合約才適用，現貨新手不要做空。</p></div>
+        <div><b>灰色</b><p>等待，不交易。方向不明、太遠、太熱、風險報酬不夠，都先不要做。</p></div>
+      </div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="card-head">
+        <span>價格圖</span>
+        <small id="chartNote">收盤價 / SMA20 / SMA50</small>
+      </div>
+      <canvas id="priceChart" height="130"></canvas>
+    </section>
+
+    <section class="two-grid">
+      <article class="card">
+        <div class="card-head">
+          <span>白話原因</span>
+          <small>為什麼是這個建議</small>
+        </div>
+        <ul id="reasons" class="reasons"></ul>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span>重要數據</span>
+          <small>進階數據，先看文字就好</small>
+        </div>
+        <div id="metrics" class="metrics"></div>
+      </article>
+    </section>
+
+    <section class="card scan-card">
+      <div class="card-head">
+        <span>主流幣掃描器</span>
+        <small>找出今天比較值得觀察的幣</small>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>幣種</th>
+              <th>建議</th>
+              <th>現價</th>
+              <th>進場區</th>
+              <th>止損</th>
+              <th>TP2</th>
+              <th>R:R</th>
+              <th>原因</th>
+            </tr>
+          </thead>
+          <tbody id="scanBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="disclaimer">
+      <strong>風險提醒：</strong>這是技術分析輔助工具，不是投資建議，也不能保證獲利。OKX 合約和槓桿會放大虧損。任何交易都必須先設止損，且單筆風險不要超過自己能承受的範圍。
+    </section>
+  </main>
+</body>
+</html>
