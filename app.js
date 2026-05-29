@@ -257,6 +257,7 @@ function renderPlan(a){
   if(!a.plan){
     $('sideOut').textContent='等待';
     ['entryOut','stopOut','tp1Out','tp2Out','tp3Out','rrOut','positionOut','marginOut'].forEach(id=>$(id).textContent='—');
+    if($('riskSentence')) $('riskSentence').textContent = '目前沒有合格交易計畫，所以不需要填下單參數。等待是保護本金的一部分。';
     return;
   }
   const p=a.plan;
@@ -270,9 +271,22 @@ function renderPlan(a){
   $('rrOut').textContent = `約 1 : ${p.rr.toFixed(1)}`;
   $('positionOut').textContent = `${fmtPrice(p.notional)} USDT 名義倉位`;
   $('marginOut').textContent = a.market==='spot' ? '現貨無槓桿' : `${fmtPrice(p.margin)} USDT，${a.lev}x`;
+  if($('riskSentence')){
+    const riskCash = a.account * a.riskPct;
+    const actionText = p.side === 'LONG' ? (a.market === 'spot' ? '買入' : '開多') : (a.market === 'spot' ? '不買 / 持倉賣出' : '開空');
+    $('riskSentence').textContent = `本次建議動作：${actionText}。如果打到止損，預估最多虧約 ${fmtPrice(riskCash)} USDT。`;
+  }
 }
 function paramRows(rows){
   return rows.map(([k,v,hint])=>`<div class="param-row"><small>${escapeHtml(k)}</small><strong>${escapeHtml(v)}</strong>${hint?`<em>${escapeHtml(hint)}</em>`:''}</div>`).join('');
+}
+function plainRows(rows){
+  return rows.map(([k,v,hint])=>`${k}：${v}${hint ? `（${hint}）` : ''}`).join('\n');
+}
+function setMainTicket(title, rows){
+  if($('mainTicketTitle')) $('mainTicketTitle').textContent = title;
+  if($('mainTicket')) $('mainTicket').innerHTML = paramRows(rows);
+  if($('copyTicketBtn')) $('copyTicketBtn').dataset.copy = plainRows(rows);
 }
 function renderOkxParams(a){
   const p = a.plan;
@@ -281,11 +295,17 @@ function renderOkxParams(a){
   if(!p){
     const waitRows = [
       ['目前動作','等待，不下單','OKX 任何欄位都先不要填'],
-      ['原因','訊號不夠清楚','空手也是交易策略'],
-      ['提醒','等網站出現做多 / 做空，再回來看參數','不要為了交易而交易']
+      ['交易類型', a.market==='spot' ? '現貨' : '合約', '保持空手，等下一次訊號'],
+      ['委託類型','不要選','目前不是好的進場點'],
+      ['價格','不要填','不要硬追單'],
+      ['數量','不要填','保留資金'],
+      ['止盈止損','暫不設定','沒有進場就不用設'],
+      ['下一步','等待重新分析','方向清楚後再操作'],
+      ['提醒','空手也是策略','不要為了交易而交易']
     ];
     $('contractParams').innerHTML = paramRows(waitRows);
     $('spotParams').innerHTML = paramRows(waitRows);
+    setMainTicket('OKX 下單欄位怎麼填：目前等待', waitRows);
     return;
   }
 
@@ -293,10 +313,10 @@ function renderOkxParams(a){
   const contractRows = [
     ['交易對', swapId, 'OKX 合約搜尋這個名稱'],
     ['頁籤', '交易 → 開倉', '不是平倉'],
-    ['倉位模式', '逐倉', '新手不要用全倉，避免整個帳戶被拖下水'],
-    ['方向', contractAction, p.side==='LONG'?'綠色按鈕':'紅色按鈕'],
+    ['倉位模式', '逐倉', '新手不要用全倉'],
+    ['方向', contractAction, p.side==='LONG'?'綠色開多按鈕':'紅色開空按鈕'],
     ['槓桿', `${a.lev}x`, '新手建議 1x - 2x，最多不要超過 3x'],
-    ['委託類型', '限價委託', '不要市價追單，等價格到進場區'],
+    ['委託類型', '限價委託', '不要用市價追單'],
     ['價格欄', `${fmtPrice(p.entryLow)} - ${fmtPrice(p.entryHigh)}`, '價格接近這區間再掛單'],
     ['數量單位', 'USDT', '截圖數量欄右側選 USDT'],
     ['數量', `${fmtPrice(p.notional)} USDT`, '這是名義倉位，不是保證金'],
@@ -331,8 +351,12 @@ function renderOkxParams(a){
     ['下方目標 3', `${fmtPrice(p.tp3)}｜可觀察`, '不要把現貨當合約做空'],
     ['現貨提醒', '偏空 = 不買', '想做空請切到合約並用逐倉止損']
   ];
+
   $('contractParams').innerHTML = paramRows(contractRows);
   $('spotParams').innerHTML = paramRows(spotRows);
+  const isSpot = a.market === 'spot';
+  const mainRows = isSpot ? spotRows : contractRows;
+  setMainTicket(isSpot ? 'OKX 現貨下單欄位怎麼填' : 'OKX 合約下單欄位怎麼填', mainRows);
 }
 function renderReasons(reasons){ $('reasons').innerHTML = reasons.map(r=>`<li>${escapeHtml(r)}</li>`).join(''); }
 function renderMetrics(a){
@@ -428,6 +452,16 @@ function init(){
   $('analyzeBtn').addEventListener('click', analyzeSelected);
   $('refreshBtn').addEventListener('click', analyzeSelected);
   $('scanBtn').addEventListener('click', scanSymbols);
+  if($('copyTicketBtn')) $('copyTicketBtn').addEventListener('click', async ()=>{
+    const text = $('copyTicketBtn').dataset.copy || '尚未產生下單參數';
+    try{
+      await navigator.clipboard.writeText(text);
+      $('copyTicketBtn').textContent = '已複製';
+      setTimeout(()=>$('copyTicketBtn').textContent='複製參數', 1200);
+    }catch{
+      alert(text);
+    }
+  });
   ['accountInput','riskSelect','leverageSelect','rrSelect','modeSelect','barSelect'].forEach(id=>$(id).addEventListener('change',()=>{ if(lastAnalysis) analyzeSelected(); }));
   setStatus('準備完成。合約建議用逐倉、4H、1% 風險、2x 槓桿；現貨沒有做空，偏空就不買。');
 }
