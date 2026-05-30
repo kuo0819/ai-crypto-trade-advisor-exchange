@@ -246,6 +246,7 @@ function renderAnalysis(a){
   renderReasons(a.reasons);
   renderMetrics(a);
   renderChart(a);
+  renderSimulation(a);
 }
 function simpleText(a){
   if(a.market==='spot' && a.side==='SHORT') return '現貨沒有做空按鈕。偏空時不要買；如果你已經持有，可以參考現貨參數分批賣出或設止損。';
@@ -388,6 +389,175 @@ function renderChart(a){
   });
 }
 
+function barHoldLimit(){
+  const bar = $('barSelect').value;
+  if(bar === '1H') return 24;
+  if(bar === '1D') return 14;
+  return 18;
+}
+function tradeSideText(side, market){
+  if(side === 'LONG') return market === 'spot' ? '現貨買入' : '合約開多';
+  if(side === 'SHORT') return market === 'spot' ? '現貨不交易' : '合約開空';
+  return '等待';
+}
+function simulateOneTrade(signal, futureCandles, maxHold){
+  const p = signal.plan;
+  if(!p || !futureCandles.length) return null;
+  const dir = p.side === 'LONG' ? 1 : -1;
+  const entry = futureCandles[0].open;
+  const stop = p.stop;
+  const targets = [p.tp1, p.tp2, p.tp3];
+  const shares = [0.3, 0.3, 0.4];
+  const qty = p.qtyCoin;
+  const riskCash = signal.account * signal.riskPct;
+  const feeRate = signal.market === 'swap' ? 0.0005 : 0.001;
+  let remaining = 1;
+  let pnl = 0;
+  let exitPrice = entry;
+  let result = '時間到出場';
+  let hit = [false,false,false];
+  let hold = 0;
+  const slice = futureCandles.slice(0, maxHold);
+  for(let i=0;i<slice.length;i++){
+    const c = slice[i];
+    hold = i + 1;
+    const stopHit = p.side === 'LONG' ? c.low <= stop : c.high >= stop;
+    const tpHitAny = targets.some((t,idx)=>!hit[idx] && (p.side === 'LONG' ? c.high >= t : c.low <= t));
+    // 保守處理：同一根 K 線同時碰到止盈與止損時，先算止損，避免高估績效。
+    if(stopHit && tpHitAny){
+      pnl += qty * remaining * (stop - entry) * dir;
+      exitPrice = stop;
+      result = '止損';
+      remaining = 0;
+      break;
+    }
+    if(stopHit){
+      pnl += qty * remaining * (stop - entry) * dir;
+      exitPrice = stop;
+      result = '止損';
+      remaining = 0;
+      break;
+    }
+    for(let t=0;t<targets.length;t++){
+      if(hit[t]) continue;
+      const reached = p.side === 'LONG' ? c.high >= targets[t] : c.low <= targets[t];
+      if(reached){
+        hit[t] = true;
+        pnl += qty * shares[t] * (targets[t] - entry) * dir;
+        remaining -= shares[t];
+        exitPrice = targets[t];
+        result = `TP${t+1}`;
+      }
+    }
+    if(remaining <= 0.001){
+      remaining = 0;
+      result = 'TP3 全部止盈';
+      break;
+    }
+  }
+  if(remaining > 0){
+    const last = slice.at(-1) || futureCandles.at(-1);
+    exitPrice = last.close;
+    pnl += qty * remaining * (exitPrice - entry) * dir;
+  }
+  const grossNotional = Math.abs(qty * entry);
+  const fees = grossNotional * feeRate * 2;
+  pnl -= fees;
+  const rMultiple = riskCash ? pnl / riskCash : 0;
+  return {entry, exitPrice, pnl, rMultiple, result, hold, fees};
+}
+function runSimulation(a){
+  const candles = a.candles;
+  const maxHold = barHoldLimit();
+  const trades = [];
+  const start = Math.max(70, candles.length - 150);
+  let i = start;
+  while(i < candles.length - maxHold - 2){
+    const sample = candles.slice(0, i + 1);
+    const ticker = {last: sample.at(-1).close, change24h: NaN, volCcy24h: NaN};
+    const sig = analyzeFromCandles(a.instId, sample, ticker);
+    const tradable = sig.plan && (sig.market === 'swap' || sig.side === 'LONG');
+    if(sig.side !== 'WAIT' && tradable){
+      const outcome = simulateOneTrade(sig, candles.slice(i + 1), maxHold);
+      if(outcome){
+        trades.push({
+          time: candles[i + 1].time,
+          side: sig.side,
+          market: sig.market,
+          entry: outcome.entry,
+          exitPrice: outcome.exitPrice,
+          pnl: outcome.pnl,
+          rMultiple: outcome.rMultiple,
+          result: outcome.result,
+          hold: outcome.hold
+        });
+        i += Math.max(1, outcome.hold);
+        continue;
+      }
+    }
+    i += 1;
+  }
+  let total = 0, peak = 0, maxDD = 0, wins = 0;
+  const equity = [];
+  for(const t of trades){
+    total += t.pnl;
+    if(t.pnl > 0) wins++;
+    peak = Math.max(peak, total);
+    maxDD = Math.min(maxDD, total - peak);
+    equity.push(total);
+  }
+  const avgR = trades.length ? trades.reduce((sum,t)=>sum+t.rMultiple,0)/trades.length : 0;
+  return {trades, total, wins, winRate: trades.length ? wins/trades.length*100 : 0, maxDD, avgR, maxHold};
+}
+function renderSimulation(a){
+  const summary = $('simSummary');
+  const body = $('simBody');
+  if(!summary || !body) return;
+  const sim = runSimulation(a);
+  if(!sim.trades.length){
+    summary.innerHTML = `<div><small>模擬結果</small><strong>沒有出現足夠交易機會</strong><em>最近 K 線沒有符合這套策略的進場條件</em></div>`;
+    body.innerHTML = `<tr><td colspan="8" class="muted">這段歷史資料沒有可模擬的進場點。這不代表策略壞掉，可能只是目前行情不適合交易。</td></tr>`;
+    $('simExplain').textContent = `使用最近 ${a.candles.length} 根 ${$('barSelect').value} K 線模擬。若沒有交易，代表依照目前參數，過去一段時間多數時候應該等待。`;
+    if($('copySimBtn')) $('copySimBtn').dataset.copy = '策略模擬：沒有出現足夠交易機會';
+    return;
+  }
+  const riskCash = a.account * a.riskPct;
+  const totalClass = sim.total >= 0 ? 'positive' : 'negative';
+  summary.innerHTML = `
+    <div><small>總損益</small><strong class="${totalClass}">${sim.total>=0?'+':''}${fmtPrice(sim.total)} USDT</strong><em>以目前帳戶與風險參數估算</em></div>
+    <div><small>交易次數</small><strong>${sim.trades.length} 筆</strong><em>最近歷史 K 線模擬</em></div>
+    <div><small>勝率</small><strong>${sim.winRate.toFixed(1)}%</strong><em>${sim.wins} 勝 / ${sim.trades.length-sim.wins} 敗</em></div>
+    <div><small>平均 R 值</small><strong>${sim.avgR.toFixed(2)}R</strong><em>1R 約 ${fmtPrice(riskCash)} USDT</em></div>
+    <div><small>最大回落</small><strong class="negative">${fmtPrice(sim.maxDD)} USDT</strong><em>過程中最不舒服的回撤</em></div>
+    <div><small>持倉上限</small><strong>${sim.maxHold} 根 K</strong><em>沒碰 TP/SL 就用時間出場</em></div>
+  `;
+  const recent = sim.trades.slice(-12).reverse();
+  body.innerHTML = recent.map((t,idx)=>{
+    const pnlClass = t.pnl >= 0 ? 'positive' : 'negative';
+    return `<tr>
+      <td>${idx+1}</td>
+      <td>${new Date(t.time).toLocaleDateString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${tradeSideText(t.side, t.market)}</td>
+      <td>${fmtPrice(t.entry)}</td>
+      <td>${fmtPrice(t.exitPrice)}</td>
+      <td>${escapeHtml(t.result)}</td>
+      <td class="${pnlClass}">${t.rMultiple>=0?'+':''}${t.rMultiple.toFixed(2)}R</td>
+      <td class="${pnlClass}">${t.pnl>=0?'+':''}${fmtPrice(t.pnl)} USDT</td>
+    </tr>`;
+  }).join('');
+  const verdict = sim.total >= 0 ? '這段歷史資料下，這套參數呈現正報酬。' : '這段歷史資料下，這套參數呈現虧損，建議不要只靠目前設定硬做。';
+  $('simExplain').textContent = `${verdict} 模擬方式：每次訊號成立後，下一根 K 線開盤進場，依止損、TP1/TP2/TP3 分批出場；同一根 K 線同時碰到止盈與止損時，用較保守的止損計算。已粗估手續費，未包含滑價與資金費率。`;
+  if($('copySimBtn')) $('copySimBtn').dataset.copy = [
+    `策略模擬：${a.instId} ${$('barSelect').value}`,
+    `總損益：${sim.total>=0?'+':''}${fmtPrice(sim.total)} USDT`,
+    `交易次數：${sim.trades.length}`,
+    `勝率：${sim.winRate.toFixed(1)}%`,
+    `平均 R：${sim.avgR.toFixed(2)}R`,
+    `最大回落：${fmtPrice(sim.maxDD)} USDT`,
+    `提醒：回測不代表未來保證獲利。`
+  ].join('\n');
+}
+
 async function scanSymbols(){
   setBusy(true);
   const bar = $('barSelect').value;
@@ -458,6 +628,16 @@ function init(){
       await navigator.clipboard.writeText(text);
       $('copyTicketBtn').textContent = '已複製';
       setTimeout(()=>$('copyTicketBtn').textContent='複製參數', 1200);
+    }catch{
+      alert(text);
+    }
+  });
+  if($('copySimBtn')) $('copySimBtn').addEventListener('click', async ()=>{
+    const text = $('copySimBtn').dataset.copy || '尚未產生策略模擬結果';
+    try{
+      await navigator.clipboard.writeText(text);
+      $('copySimBtn').textContent = '已複製';
+      setTimeout(()=>$('copySimBtn').textContent='複製模擬結果', 1200);
     }catch{
       alert(text);
     }

@@ -132,3 +132,54 @@ select option:disabled{
   background:#1a1b16;
   color:#8f8878;
 }
+
+/* Strategy simulator */
+.sim-card{
+  padding:22px;
+  margin-bottom:18px;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.026)),
+    linear-gradient(135deg,rgba(101,182,255,.06),transparent 42%);
+  border:1px solid rgba(101,182,255,.22);
+  border-top-color:rgba(255,255,255,.18);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  backdrop-filter:blur(10px);
+  position:relative;
+  overflow:hidden;
+}
+.sim-card::before{
+  content:"";position:absolute;left:0;right:0;top:0;height:4px;
+  background:repeating-linear-gradient(135deg,#65b6ff 0 12px,#2b2b29 12px 24px);
+  opacity:.82;
+}
+.sim-summary{
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:10px;
+  margin-bottom:12px;
+}
+.sim-summary div{
+  background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(0,0,0,.18));
+  border:1px solid rgba(255,255,255,.105);
+  border-bottom-color:rgba(0,0,0,.52);
+  border-radius:14px;
+  padding:14px;
+  min-height:104px;
+}
+.sim-summary small{display:block;color:var(--muted);font-size:12px;font-weight:950;letter-spacing:.04em}
+.sim-summary strong{display:block;margin-top:6px;font-size:22px;font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;color:#fff4dd}
+.sim-summary em{display:block;margin-top:7px;color:#a9a397;font-style:normal;font-size:12px;line-height:1.35}
+.sim-explain{
+  margin:12px 0 14px;
+  padding:14px 16px;
+  border-radius:14px;
+  background:rgba(101,182,255,.09);
+  border:1px solid rgba(101,182,255,.22);
+  color:#cfe8ff;
+  line-height:1.65;
+  font-weight:800;
+}
+.sim-table-wrap table{min-width:820px}
+@media(max-width:1100px){.sim-summary{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:680px){.sim-summary{grid-template-columns:1fr}}

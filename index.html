@@ -148,6 +148,39 @@
       <div id="mainTicket" class="order-ticket-list"></div>
     </section>
 
+    <section class="sim-card">
+      <div class="section-title">
+        <div>
+          <span>Simulator</span>
+          <h2>如果照這套參數交易，過去表現如何？</h2>
+          <p>用目前幣種、週期、風險、槓桿與策略規則，回測最近的 K 線。這不是保證未來會賺，只是幫你先看這套參數最近是否順手。</p>
+        </div>
+        <button id="copySimBtn" class="ghost">複製模擬結果</button>
+      </div>
+
+      <div id="simSummary" class="sim-summary">
+        <div><small>模擬結果</small><strong>尚未分析</strong><em>分析幣種後會自動計算</em></div>
+      </div>
+
+      <div class="sim-explain" id="simExplain">
+        這裡會顯示：如果過去每次出現同樣的做多/做空條件，就依照網站給的進場、止損、TP1/TP2/TP3 去模擬，最後統計可能獲利或損失多少。
+      </div>
+
+      <div class="table-wrap sim-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>時間</th><th>方向</th><th>進場</th><th>出場</th><th>結果</th><th>R 值</th><th>損益</th>
+            </tr>
+          </thead>
+          <tbody id="simBody">
+            <tr><td colspan="8" class="muted">尚未有模擬資料。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+
     <section class="two-column">
       <article class="ticket-card">
         <div class="section-title compact">
