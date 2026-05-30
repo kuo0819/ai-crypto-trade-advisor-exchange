@@ -18,8 +18,13 @@ const PRO_CONFIG = {
   minAdx: 16,
   maxStopPct: 3.2,
   fundingLimitPct: 0.06,
-  maxAtrPct: 5.2
+  maxAtrPct: 5.2,
+  friendMaxRiskPct: 0.01,
+  friendMaxLeverage: 2,
+  dailyMaxLossR: 2,
+  dailyMaxConsecutiveLosses: 2
 };
+const JOURNAL_KEY = 'okx_friend_safe_paper_journal_v1';
 
 function fmtPrice(n){
   if(!Number.isFinite(n)) return '—';
@@ -210,11 +215,13 @@ function finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, acco
 function analyzeFromCandles(instId, candles, ticker={}, opts={}){
   const market = $('marketSelect').value;
   const account = Number($('accountInput').value || 1000);
-  const riskPct = Number($('riskSelect').value || .01);
-  const lev = market === 'spot' ? 1 : Number($('leverageSelect').value || 2);
+  const rawRiskPct = Number($('riskSelect').value || .01);
+  const rawLev = market === 'spot' ? 1 : Number($('leverageSelect').value || 2);
+  const smallMode = isSmallMode();
+  const riskPct = smallMode ? Math.min(rawRiskPct, PRO_CONFIG.friendMaxRiskPct) : rawRiskPct;
+  const lev = market === 'spot' ? 1 : (smallMode ? Math.min(rawLev, PRO_CONFIG.friendMaxLeverage) : rawLev);
   const minRR = Number($('rrSelect').value || 2);
   const mode = $('modeSelect').value;
-  const smallMode = isSmallMode();
   const btcBias = opts.btcBias || null;
   const htfBias = trendBias(opts.dailyCandles);
   const fundingRatePct = opts.funding && Number.isFinite(opts.funding.fundingRate) ? opts.funding.fundingRate * 100 : NaN;
@@ -262,6 +269,10 @@ function analyzeFromCandles(instId, candles, ticker={}, opts={}){
   if(Math.abs(long-short)<10){ side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('多空分數太接近，代表方向不夠明確。'); }
 
   if(smallMode){
+    const guard = dailyStopStatus(account, riskPct);
+    if(guard.stop){
+      side='WAIT'; label='朋友安全模式：今日停止交易'; grade='wait'; warnings.push(guard.message);
+    }
     if(btcBias?.bias === 'BEAR' && side === 'LONG' && baseCoin(instId) !== 'BTC'){
       side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：BTC 偏空，不做山寨幣多單。');
     }
@@ -362,6 +373,7 @@ function renderAnalysis(a){
   renderChart(a);
   renderSimulation(a);
   setupOkxQuickActions(a);
+  renderSafetyGuard();
 }
 function simpleText(a){
   if(a.market==='spot' && a.side==='SHORT') return '現貨沒有做空按鈕。偏空時不要買；如果你已經持有，可以參考現貨參數分批賣出或設止損。';
@@ -851,6 +863,80 @@ function renderScanRow(r,idx){
 }
 function escapeHtml(str){ return String(str).replace(/[&<>'"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 
+
+function todayKey(ts=Date.now()){
+  return new Date(ts).toLocaleDateString('zh-TW');
+}
+function readJournal(){
+  try{ return JSON.parse(localStorage.getItem(JOURNAL_KEY) || '[]'); }catch{ return []; }
+}
+function writeJournal(items){ localStorage.setItem(JOURNAL_KEY, JSON.stringify(items.slice(0,200))); }
+function dailyStopStatus(account=null, riskPct=null){
+  const items = readJournal().filter(x=>todayKey(x.ts) === todayKey());
+  let pnl = 0, losses = 0, consecutiveLosses = 0;
+  for(const x of items){
+    const v = Number(x.pnl || 0);
+    pnl += Number.isFinite(v) ? v : 0;
+    if(x.result === 'LOSS' || v < 0) losses++;
+  }
+  for(const x of [...items].reverse()){
+    const v = Number(x.pnl || 0);
+    if(x.result === 'LOSS' || v < 0) consecutiveLosses++;
+    else if(x.result === 'WIN' || v > 0) break;
+  }
+  const acc = account ?? Number($('accountInput')?.value || 100);
+  const rp = riskPct ?? Math.min(Number($('riskSelect')?.value || 0.005), PRO_CONFIG.friendMaxRiskPct);
+  const oneR = acc * rp;
+  const maxLoss = -PRO_CONFIG.dailyMaxLossR * oneR;
+  const stop = consecutiveLosses >= PRO_CONFIG.dailyMaxConsecutiveLosses || pnl <= maxLoss;
+  const message = stop
+    ? `今日已觸發停手機制：連虧 ${consecutiveLosses} 筆 / 今日損益 ${fmtPrice(pnl)} USDT。朋友安全模式建議今天停止交易。`
+    : `今日風控正常：今日損益 ${pnl>=0?'+':''}${fmtPrice(pnl)} USDT，連續虧損 ${consecutiveLosses} 筆。`;
+  return {stop, pnl, losses, consecutiveLosses, oneR, message, count:items.length};
+}
+function renderSafetyGuard(){
+  const el = $('safetyGuard'); if(!el) return;
+  const g = dailyStopStatus();
+  el.textContent = g.count ? g.message : '今天尚未有紙上交易紀錄。建議先模擬觀察，不急著真錢下單。';
+  el.className = `safety-guard ${g.stop ? 'stop' : 'ok'}`;
+}
+function addPaperTradeFromAnalysis(){
+  if(!lastAnalysis || !lastAnalysis.plan){ alert('目前沒有可記錄的交易計畫。'); return; }
+  const p = lastAnalysis.plan;
+  const result = $('paperResultSelect')?.value || 'WAIT';
+  const rawPnl = $('paperPnlInput')?.value;
+  const pnl = rawPnl === '' ? 0 : Number(rawPnl);
+  const item = {
+    ts: Date.now(), instId:lastAnalysis.instId, side:lastAnalysis.side,
+    entry:`${fmtPrice(p.entryLow)} - ${fmtPrice(p.entryHigh)}`,
+    stop:fmtPrice(p.stop), tp2:fmtPrice(p.tp2), result, pnl:Number.isFinite(pnl)?pnl:0
+  };
+  const items = readJournal();
+  items.unshift(item); writeJournal(items); renderJournal(); renderSafetyGuard();
+}
+function renderJournal(){
+  const body = $('journalBody'), summary = $('journalSummary');
+  if(!body || !summary) return;
+  const items = readJournal();
+  if(!items.length){
+    summary.textContent = '尚未有紙上交易紀錄。建議朋友先觀察 2 週，再決定是否小額實測。';
+    body.innerHTML = '<tr><td colspan="8" class="muted">尚未有紀錄。</td></tr>';
+    return;
+  }
+  const total = items.reduce((sum,x)=>sum+(Number(x.pnl)||0),0);
+  const wins = items.filter(x=>x.result==='WIN' || Number(x.pnl)>0).length;
+  const losses = items.filter(x=>x.result==='LOSS' || Number(x.pnl)<0).length;
+  summary.innerHTML = `總紀錄 ${items.length} 筆｜獲利 ${wins}｜虧損 ${losses}｜累計損益 <b class="${total>=0?'positive':'negative'}">${total>=0?'+':''}${fmtPrice(total)} USDT</b>`;
+  body.innerHTML = items.slice(0,30).map(x=>`<tr>
+    <td>${new Date(x.ts).toLocaleString('zh-TW')}</td><td>${escapeHtml(x.instId)}</td><td>${escapeHtml(x.side)}</td>
+    <td>${escapeHtml(x.entry)}</td><td>${escapeHtml(x.stop)}</td><td>${escapeHtml(x.tp2)}</td>
+    <td>${escapeHtml(x.result)}</td><td class="${Number(x.pnl)>=0?'positive':'negative'}">${Number(x.pnl)>=0?'+':''}${fmtPrice(Number(x.pnl)||0)}</td>
+  </tr>`).join('');
+}
+function clearJournal(){
+  if(confirm('確定要清空紙上交易紀錄嗎？')){ writeJournal([]); renderJournal(); renderSafetyGuard(); }
+}
+
 function applyStrategyDefaults(){
   if(!isSmallMode()) return;
   if($('riskSelect')) $('riskSelect').value = '0.005';
@@ -900,8 +986,12 @@ function init(){
   });
   ['accountInput','riskSelect','leverageSelect','rrSelect','modeSelect','barSelect'].forEach(id=>$(id).addEventListener('change',()=>{ if(lastAnalysis) analyzeSelected(); }));
   $('strategyModeSelect')?.addEventListener('change',()=>{ applyStrategyDefaults(); if(lastAnalysis) analyzeSelected(); });
+  if($('addPaperTradeBtn')) $('addPaperTradeBtn').addEventListener('click', addPaperTradeFromAnalysis);
+  if($('clearJournalBtn')) $('clearJournalBtn').addEventListener('click', clearJournal);
+  renderJournal();
+  renderSafetyGuard();
   setupOkxQuickActions(null);
-  setStatus('準備完成。小本金保守模式：逐倉、4H、0.5% 風險、1x 槓桿，只做 A 級機會；現貨偏空就不買。');
+  setStatus('準備完成。朋友分享版：逐倉、4H、0.5% 風險、1x 槓桿，只做 A 級機會；今日若觸發停手機制就不下單。');
   setTimeout(()=>scanTopPicks(true).catch(console.error), 500);
 }
 init();

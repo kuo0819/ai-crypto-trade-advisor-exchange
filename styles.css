@@ -249,3 +249,29 @@ select option:disabled{
 .auto-step strong{display:block;color:#fff;margin-bottom:6px;font-size:1.02rem}.auto-step span{color:var(--muted);font-size:.92rem}.auto-step.safe{border-color:rgba(53,208,127,.35)}.auto-step.danger{border-color:rgba(224,82,99,.38)}
 .automation-warning{margin:14px 0 0;color:#ffd38a;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:12px;padding:12px}
 @media(max-width:860px){.automation-grid{grid-template-columns:1fr}}
+
+/* Friend Safe Pro v2 additions */
+.friend-risk-card,.paper-card{
+  padding:22px;
+  border:1px solid rgba(245,158,11,.26);
+  border-radius:var(--radius);
+  background:
+    linear-gradient(180deg,rgba(245,158,11,.09),rgba(255,255,255,.035)),
+    rgba(17,19,16,.92);
+  box-shadow:var(--shadow);
+  margin-bottom:18px;
+}
+.safety-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px}
+.safety-grid>div,.journal-summary{
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:14px;
+  background:rgba(0,0,0,.18);
+}
+.safety-grid small{display:block;color:var(--muted);font-size:12px}.safety-grid strong{display:block;font-size:20px;color:#ffd991}.safety-grid em{display:block;color:#bfb7a8;font-style:normal;font-size:12px;margin-top:3px}
+.safety-guard{margin-top:14px;border-radius:14px;padding:14px 16px;border:1px solid rgba(102,182,255,.22);background:rgba(102,182,255,.08);color:#dceeff;font-weight:800}
+.safety-guard.stop{border-color:rgba(224,82,99,.4);background:rgba(224,82,99,.12);color:#ffd7dc}
+.safety-guard.ok{border-color:rgba(53,208,127,.3);background:rgba(53,208,127,.10);color:#d9ffe9}
+.journal-actions{display:grid;grid-template-columns:1.4fr .8fr 1fr;gap:12px;margin:14px 0}.journal-actions input,.journal-actions select{width:100%}
+.journal-summary{margin-bottom:12px;color:#eadfca}.journal-table-wrap table{min-width:860px}.paper-card .primary{min-height:48px}
+@media(max-width:900px){.safety-grid,.journal-actions{grid-template-columns:1fr}}

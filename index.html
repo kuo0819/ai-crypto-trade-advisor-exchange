@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI OKX Pro Conservative v2 交易助手</title>
+  <title>AI OKX Friend Safe Pro v2 交易助手</title>
   <meta name="description" content="OKX 新手下單參數助手：合約與現貨分開顯示，直接對應 OKX 欄位、進場、止損、止盈、倉位與風險。" />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
@@ -14,8 +14,8 @@
     <div class="brand">
       <div class="logo">OKX</div>
       <div>
-        <strong>AI OKX Pro Conservative v2 交易助手</strong>
-        <span>Pro Conservative v2｜網站與 Telegram Worker 同步策略</span>
+        <strong>AI OKX Friend Safe Pro v2</strong>
+        <span>朋友分享版｜保守策略｜網站與 Telegram Worker 同步</span>
       </div>
     </div>
     <button id="refreshBtn" class="ghost">↻ 重新分析</button>
@@ -28,7 +28,7 @@
           <span>Control</span>
           <h2>選擇交易設定</h2>
         </div>
-        <small>Pro v2 預設：4H 已收線、日線確認、BTC 濾網、ADX、資金費率、只做 A 級機會</small>
+        <small>朋友分享版：安全模式鎖定、紙上交易紀錄、每日停手機制、Telegram 風險提醒</small>
       </div>
 
       <div class="settings-grid">
@@ -36,7 +36,7 @@
           <label for="strategyModeSelect">策略模式</label>
           <select id="strategyModeSelect">
             <option value="small" selected>Pro Conservative v2｜只做 A 級，0.5% 風險，1x 槓桿</option>
-            <option value="normal">一般模式｜訊號較多，但風險較高</option>
+            <option value="normal">進階模式｜不建議朋友新手使用</option>
           </select>
         </div>
         <div class="field wide">
@@ -74,7 +74,7 @@
           <select id="riskSelect">
             <option value="0.005" selected>0.5%｜小本金建議</option>
             <option value="0.01">1%｜新手上限</option>
-            <option value="0.02">2%｜風險較高</option>
+            
           </select>
         </div>
         <div class="field">
@@ -82,8 +82,7 @@
           <select id="leverageSelect">
             <option value="1" selected>1x｜小本金建議</option>
             <option value="2">2x｜新手上限建議</option>
-            <option value="3">3x｜需嚴格止損</option>
-            <option value="5">5x｜不建議新手</option>
+            
           </select>
         </div>
         <div class="field">
@@ -101,6 +100,23 @@
         <button id="scanBtn" class="secondary">掃描主流幣</button>
       </div>
       <div id="status" class="status">準備完成，請按「分析這個幣種」。</div>
+    </section>
+
+    <section class="friend-risk-card">
+      <div class="section-title compact">
+        <div>
+          <span>Friend Safe</span>
+          <h2>朋友分享版安全規則</h2>
+        </div>
+        <small>這些規則會同步影響網站下單建議與 Telegram 提醒文案。</small>
+      </div>
+      <div class="safety-grid">
+        <div><small>單筆風險</small><strong>預設 0.5%</strong><em>最多建議 1%</em></div>
+        <div><small>合約槓桿</small><strong>1x 優先</strong><em>朋友新手最高 2x</em></div>
+        <div><small>每日停手</small><strong>虧 2R 停止</strong><em>或連虧 2 筆停止</em></div>
+        <div><small>交易方式</small><strong>只手動下單</strong><em>不提供自動真錢下單</em></div>
+      </div>
+      <div id="safetyGuard" class="safety-guard">正在檢查今日紙上交易紀錄...</div>
     </section>
 
     <section class="recommend-card">
@@ -246,6 +262,33 @@
       </article>
     </section>
 
+    <section class="paper-card">
+      <div class="section-title">
+        <div>
+          <span>Paper Trading</span>
+          <h2>紙上交易紀錄</h2>
+          <p>分享給朋友前，建議先模擬至少 2 週。每次收到訊號先記錄結果，不急著真錢交易。</p>
+        </div>
+        <button id="clearJournalBtn" class="ghost">清空紀錄</button>
+      </div>
+      <div class="journal-actions">
+        <button id="addPaperTradeBtn" class="primary">把目前分析加入紙上交易</button>
+        <select id="paperResultSelect">
+          <option value="WAIT">尚未結束</option>
+          <option value="WIN">獲利</option>
+          <option value="LOSS">虧損</option>
+        </select>
+        <input id="paperPnlInput" type="number" step="0.01" placeholder="結果損益 USDT，可留空" />
+      </div>
+      <div id="journalSummary" class="journal-summary">尚未有紙上交易紀錄。</div>
+      <div class="table-wrap journal-table-wrap">
+        <table>
+          <thead><tr><th>時間</th><th>幣種</th><th>方向</th><th>進場區</th><th>SL</th><th>TP2</th><th>結果</th><th>損益</th></tr></thead>
+          <tbody id="journalBody"><tr><td colspan="8" class="muted">尚未有紀錄。</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
     <details class="advanced-card">
       <summary>查看進階資料：價格圖、技術指標、主流幣掃描</summary>
       <section class="card chart-card">
@@ -290,7 +333,7 @@
     </section>
 
     <section class="disclaimer">
-      <strong>風險提醒：</strong>這是小本金保守型技術分析輔助工具，不是投資建議，也不能保證獲利。OKX 合約和槓桿會放大虧損。任何交易都必須先設止損，且單筆風險不要超過自己能承受的範圍。
+      <strong>朋友分享版風險提醒：</strong>這是技術分析輔助工具，不是投資建議，也不能保證獲利。請先紙上交易至少 2 週；合約只用逐倉、1x～2x、必填止損。若今日已連虧 2 筆或虧損達 2R，請停止交易。
     </section>
   </main>
 </body>
