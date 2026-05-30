@@ -13,6 +13,14 @@ const $ = id => document.getElementById(id);
 let chart;
 let lastAnalysis = null;
 
+const PRO_CONFIG = {
+  minScore: 82,
+  minAdx: 16,
+  maxStopPct: 3.2,
+  fundingLimitPct: 0.06,
+  maxAtrPct: 5.2
+};
+
 function fmtPrice(n){
   if(!Number.isFinite(n)) return '—';
   if(Math.abs(n)>=1000) return n.toLocaleString(undefined,{maximumFractionDigits:2});
@@ -27,6 +35,24 @@ function toSpotInstId(instId){ return instId.replace('-SWAP',''); }
 function toSwapInstId(instId){ return instId.endsWith('-SWAP') ? instId : `${instId}-SWAP`; }
 function baseCoin(instId){ return instId.split('-')[0]; }
 function currentSymbols(){ return $('marketSelect').value === 'spot' ? SPOT_SYMBOLS : CONTRACT_SYMBOLS; }
+function isSmallMode(){ return $('strategyModeSelect')?.value === 'small'; }
+function tpShares(){ return isSmallMode() ? [0.5, 0.3, 0.2] : [0.3, 0.3, 0.4]; }
+function trendBias(candles){
+  if(!candles || candles.length < 55) return 'NEUTRAL';
+  const closes = candles.map(c=>c.close);
+  const s20 = sma(closes,20).at(-1), s50 = sma(closes,50).at(-1), price = closes.at(-1);
+  if(price > s50 && s20 > s50) return 'BULL';
+  if(price < s50 && s20 < s50) return 'BEAR';
+  return 'NEUTRAL';
+}
+function classifyBtcBias(candles, dailyCandles=null){
+  const intraday = trendBias(candles);
+  const daily = trendBias(dailyCandles);
+  if(intraday === 'BULL' && daily !== 'BEAR') return {bias:'BULL', text: daily === 'BULL' ? 'BTC 4H/1D 同步偏多' : 'BTC 4H 偏多、日線未轉空'};
+  if(intraday === 'BEAR' && daily !== 'BULL') return {bias:'BEAR', text: daily === 'BEAR' ? 'BTC 4H/1D 同步偏空' : 'BTC 4H 偏空、日線未轉多'};
+  return {bias:'NEUTRAL', text:'BTC 大盤方向不夠一致'};
+}
+
 
 function setStatus(msg, type='info'){
   const s=$('status'); s.textContent=msg;
@@ -50,10 +76,21 @@ async function getCandles(instId, bar='4H', limit=200){
   if(String(json.code)!=='0' || !Array.isArray(json.data) || !json.data.length){
     throw new Error(json.msg || 'OKX 沒有回傳 K 線資料');
   }
-  return json.data.map(r=>({
+  const rows = json.data.map(r=>({
     time:Number(r[0]), open:Number(r[1]), high:Number(r[2]), low:Number(r[3]), close:Number(r[4]),
     volume:Number(r[7] || r[5] || 0), confirm:String(r[8] ?? '1')
   })).filter(c=>[c.open,c.high,c.low,c.close].every(Number.isFinite)).sort((a,b)=>a.time-b.time);
+  const closed = rows.filter(c=>c.confirm === '1');
+  return closed.length >= 60 ? closed : rows;
+}
+
+async function getFundingRate(instId){
+  if(!String(instId).endsWith('-SWAP')) return null;
+  const url = `https://www.okx.com/api/v5/public/funding-rate?instId=${encodeURIComponent(instId)}`;
+  const json = await fetchJson(url).catch(()=>null);
+  const f = json?.data?.[0];
+  if(!f) return null;
+  return { fundingRate: Number(f.fundingRate), nextFundingTime: Number(f.nextFundingTime) };
 }
 
 async function getTicker(instId){
@@ -92,6 +129,27 @@ function atr(candles, period=14){
   }
   return trs.slice(-period).reduce((a,b)=>a+b,0)/period;
 }
+function adx(candles, period=14){
+  if(candles.length < period + 2) return NaN;
+  const trs=[], plusDM=[], minusDM=[];
+  for(let i=1;i<candles.length;i++){
+    const c=candles[i], p=candles[i-1];
+    const up = c.high - p.high;
+    const down = p.low - c.low;
+    plusDM.push(up > down && up > 0 ? up : 0);
+    minusDM.push(down > up && down > 0 ? down : 0);
+    trs.push(Math.max(c.high-c.low, Math.abs(c.high-p.close), Math.abs(c.low-p.close)));
+  }
+  const dx=[];
+  for(let i=period-1;i<trs.length;i++){
+    const tr = trs.slice(i-period+1,i+1).reduce((a,b)=>a+b,0);
+    const pdi = tr ? 100 * plusDM.slice(i-period+1,i+1).reduce((a,b)=>a+b,0) / tr : 0;
+    const mdi = tr ? 100 * minusDM.slice(i-period+1,i+1).reduce((a,b)=>a+b,0) / tr : 0;
+    dx.push((pdi+mdi) ? 100 * Math.abs(pdi-mdi)/(pdi+mdi) : 0);
+  }
+  if(dx.length < period) return NaN;
+  return dx.slice(-period).reduce((a,b)=>a+b,0)/period;
+}
 function pct(a,b){ return a ? (b-a)/a*100 : 0; }
 function levels(candles){
   const look = candles.slice(-42);
@@ -110,25 +168,26 @@ function volumeRatio(candles){
   return avg ? last/avg : NaN;
 }
 
-function makePlan(side, price, atrV, lev, account, riskPct, minRR, lvls, market='swap'){
+function makePlan(side, price, atrV, lev, account, riskPct, minRR, lvls, market='swap', sma20Val=NaN){
+  if(!Number.isFinite(atrV) || atrV <= 0) return null;
   if(side==='LONG'){
-    const entryMid = price;
-    const entryLow = price - atrV*0.25;
-    const entryHigh = price + atrV*0.10;
+    const entryMid = Number.isFinite(sma20Val) ? Math.max(sma20Val, price - atrV*0.35) : price;
+    const entryLow = entryMid - atrV*0.20;
+    const entryHigh = entryMid + atrV*0.10;
     const structureStop = lvls.recentLow - atrV*0.2;
     const atrStop = entryMid - atrV*1.25;
     const stop = Math.min(structureStop, atrStop);
-    const risk = Math.max(entryMid-stop, atrV*0.8);
+    const risk = Math.max(entryMid-stop, atrV*0.9);
     return finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, account, riskPct, minRR, market);
   }
   if(side==='SHORT'){
-    const entryMid = price;
-    const entryLow = price - atrV*0.10;
-    const entryHigh = price + atrV*0.25;
+    const entryMid = Number.isFinite(sma20Val) ? Math.min(sma20Val, price + atrV*0.35) : price;
+    const entryLow = entryMid - atrV*0.10;
+    const entryHigh = entryMid + atrV*0.20;
     const structureStop = lvls.recentHigh + atrV*0.2;
     const atrStop = entryMid + atrV*1.25;
     const stop = Math.max(structureStop, atrStop);
-    const risk = Math.max(stop-entryMid, atrV*0.8);
+    const risk = Math.max(stop-entryMid, atrV*0.9);
     return finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, account, riskPct, minRR, market);
   }
   return null;
@@ -145,16 +204,20 @@ function finalizePlan(side, entryLow, entryHigh, entryMid, stop, risk, lev, acco
   const margin = lev > 0 ? notional / lev : notional;
   const stopPct = Math.abs(entryMid-stop)/entryMid*100;
   const trailingCallback = clamp(Math.round((stopPct * 0.7) * 10) / 10, 2, 10);
-  return {side, entryLow, entryHigh, entryMid, stop, tp1, tp2, tp3, risk, rr: 2, qtyCoin, notional, margin, minRR, stopPct, trailingCallback};
+  return {side, entryLow, entryHigh, entryMid, stop, tp1, tp2, tp3, risk, rr: 2, qtyCoin, notional, margin, minRR, stopPct, trailingCallback, shares: tpShares()};
 }
 
-function analyzeFromCandles(instId, candles, ticker={}){
+function analyzeFromCandles(instId, candles, ticker={}, opts={}){
   const market = $('marketSelect').value;
   const account = Number($('accountInput').value || 1000);
   const riskPct = Number($('riskSelect').value || .01);
   const lev = market === 'spot' ? 1 : Number($('leverageSelect').value || 2);
   const minRR = Number($('rrSelect').value || 2);
   const mode = $('modeSelect').value;
+  const smallMode = isSmallMode();
+  const btcBias = opts.btcBias || null;
+  const htfBias = trendBias(opts.dailyCandles);
+  const fundingRatePct = opts.funding && Number.isFinite(opts.funding.fundingRate) ? opts.funding.fundingRate * 100 : NaN;
   const closes = candles.map(c=>c.close);
   const s20 = sma(closes,20), s50=sma(closes,50);
   const price = Number.isFinite(ticker.last) ? ticker.last : closes.at(-1);
@@ -162,6 +225,8 @@ function analyzeFromCandles(instId, candles, ticker={}){
   const rsi14 = rsi(closes,14);
   const atr14 = atr(candles,14);
   const atrPct = atr14 / price * 100;
+  const adx14 = adx(candles,14);
+  const maGapPct = Math.abs(sma20-sma50)/price*100;
   const distSma20 = (price-sma20)/price*100;
   const trend10 = pct(closes.at(-11), closes.at(-1));
   const trend30 = pct(closes.at(-31), closes.at(-1));
@@ -177,8 +242,12 @@ function analyzeFromCandles(instId, candles, ticker={}){
   if(rsi14>=32 && rsi14<=55){ short+=14; reasonsShort.push('RSI 偏弱但還沒嚴重超賣，做空條件較健康。'); }
   if(trend10>0 && trend30>0){ long+=12; reasonsLong.push('最近價格有往上推進。'); }
   if(trend10<0 && trend30<0){ short+=12; reasonsShort.push('最近價格有往下推進。'); }
-  if(volR>=0.8){ long+=6; short+=6; } else warnings.push('最近成交量偏低，訊號可信度會下降。');
-  if(Math.abs(distSma20) < atrPct*1.8){ long+=8; short+=8; } else warnings.push('價格離短期平均線太遠，容易追高或追低。');
+  if(htfBias==='BULL'){ long+=10; reasonsLong.push('日線偏多，沒有逆風。'); }
+  if(htfBias==='BEAR'){ short+=10; reasonsShort.push('日線偏空，沒有逆風。'); }
+  if(Number.isFinite(adx14) && adx14>=PRO_CONFIG.minAdx){ long+=6; short+=6; } else warnings.push('ADX 趨勢強度不足，容易盤整洗單。');
+  if(Number.isFinite(maGapPct) && maGapPct >= atrPct*0.15){ long+=5; short+=5; } else warnings.push('SMA20 / SMA50 太接近，代表方向可能不明確。');
+  if(volR>=0.85){ long+=6; short+=6; } else warnings.push('最近成交量偏低，訊號可信度會下降。');
+  if(Math.abs(distSma20) < atrPct*1.25){ long+=8; short+=8; } else warnings.push('價格離短期平均線太遠，容易追高或追低。');
   if(rsi14>75) warnings.push('RSI 過熱，新手不建議追多，等回踩比較安全。');
   if(rsi14<25) warnings.push('RSI 過度超賣，新手不建議追空，等反彈比較安全。');
   if(atrPct>8) warnings.push('目前波動很大，建議降低倉位或槓桿。');
@@ -187,10 +256,46 @@ function analyzeFromCandles(instId, candles, ticker={}){
   short = clamp(Math.round(short),0,100);
 
   let side='WAIT', label='等待，不交易', grade='wait';
-  const threshold = mode==='conservative' ? 72 : 64;
-  if(long>=threshold && long>=short+10 && rsi14<75) { side='LONG'; label='可以觀察做多'; grade='long'; }
-  if(short>=threshold && short>=long+10 && rsi14>25) { side='SHORT'; label='可以觀察做空'; grade='short'; }
+  const threshold = smallMode ? PRO_CONFIG.minScore : (mode==='conservative' ? 72 : 64);
+  if(long>=threshold && long>=short+10 && rsi14<75) { side='LONG'; label=smallMode?'A 級：可以觀察做多':'可以觀察做多'; grade='long'; }
+  if(short>=threshold && short>=long+10 && rsi14>25) { side='SHORT'; label=smallMode?'A 級：可以觀察做空':'可以觀察做空'; grade='short'; }
   if(Math.abs(long-short)<10){ side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('多空分數太接近，代表方向不夠明確。'); }
+
+  if(smallMode){
+    if(btcBias?.bias === 'BEAR' && side === 'LONG' && baseCoin(instId) !== 'BTC'){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：BTC 偏空，不做山寨幣多單。');
+    }
+    if(btcBias?.bias === 'BULL' && side === 'SHORT' && baseCoin(instId) !== 'BTC'){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：BTC 偏多，不做山寨幣空單。');
+    }
+    if(btcBias?.bias === 'NEUTRAL' && Math.max(long, short) < threshold + 6){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：BTC 方向不一致，只接受更強訊號。');
+    }
+    if(htfBias === 'BEAR' && side === 'LONG'){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：日線偏空，不逆勢做多。');
+    }
+    if(htfBias === 'BULL' && side === 'SHORT'){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：日線偏多，不逆勢做空。');
+    }
+    if(Number.isFinite(adx14) && adx14 < PRO_CONFIG.minAdx){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：ADX 趨勢強度不足，先不交易。');
+    }
+    if(Number.isFinite(maGapPct) && maGapPct < atrPct * 0.15){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：均線糾纏，容易被洗單。');
+    }
+    if(atrPct > PRO_CONFIG.maxAtrPct){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：目前波動太大，小本金先避免交易。');
+    }
+    if(Math.abs(distSma20) > atrPct * 1.25){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：價格離 SMA20 太遠，不追單。');
+    }
+    if(side === 'LONG' && Number.isFinite(fundingRatePct) && fundingRatePct > PRO_CONFIG.fundingLimitPct){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：資金費率偏高，做多成本不划算。');
+    }
+    if(side === 'SHORT' && Number.isFinite(fundingRatePct) && fundingRatePct < -PRO_CONFIG.fundingLimitPct){
+      side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：資金費率偏負，做空成本不划算。');
+    }
+  }
 
   if(market === 'spot' && side === 'SHORT'){
     label = '現貨偏空：不買，持倉可考慮賣出';
@@ -198,18 +303,19 @@ function analyzeFromCandles(instId, candles, ticker={}){
     warnings.push('現貨不能真正做空；偏空時新手不要開新倉買入。');
   }
 
-  let plan = side==='WAIT' ? null : makePlan(side, price, atr14, lev, account, riskPct, minRR, lvls, market);
-  if(market === 'spot' && side === 'SHORT') plan = makePlan('SHORT', price, atr14, 1, account, riskPct, minRR, lvls, market);
+  let plan = side==='WAIT' ? null : makePlan(side, price, atr14, lev, account, riskPct, minRR, lvls, market, sma20);
+  if(market === 'spot' && side === 'SHORT') plan = makePlan('SHORT', price, atr14, 1, account, riskPct, minRR, lvls, market, sma20);
   if(plan){
     const rrOk = plan.rr >= minRR;
     if(!rrOk){ side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push(`風險報酬比低於 ${minRR}，不符合新手交易條件。`); plan=null; }
+    if(plan && smallMode && plan.stopPct > PRO_CONFIG.maxStopPct){ side='WAIT'; label='等待，不交易'; grade='wait'; warnings.push('Pro v2：止損距離太大，小本金不適合。'); plan=null; }
   }
 
   const reasons = side==='LONG' ? reasonsLong : side==='SHORT' ? reasonsShort : warnings.slice(0,3);
   if(side==='WAIT' && reasons.length===0) reasons.push('目前沒有明確方向，先等待比較安全。');
   warnings.forEach(w=>{ if(!reasons.includes(w)) reasons.push(w); });
 
-  return {market, instId, candles, ticker, price, sma20, sma50, rsi14, atr14, atrPct, distSma20, trend10, trend30, lvls, volR, long, short, side, label, grade, plan, reasons, s20, s50, account, riskPct, lev, minRR};
+  return {market, instId, candles, ticker, price, sma20, sma50, rsi14, atr14, atrPct, adx14, maGapPct, fundingRatePct, distSma20, trend10, trend30, htfBias, lvls, volR, long, short, side, label, grade, plan, reasons, s20, s50, account, riskPct, lev, minRR, smallMode, btcBias};
 }
 
 async function analyzeSelected(){
@@ -218,8 +324,16 @@ async function analyzeSelected(){
   setBusy(true);
   try{
     setStatus(`正在向 OKX 取得 ${instId} 的 ${bar} K 線資料...`);
-    const [candles, ticker] = await Promise.all([getCandles(instId, bar, 200), getTicker(instId)]);
-    const analysis = analyzeFromCandles(instId, candles, ticker);
+    const [candles, ticker, dailyCandles, btcCandles, btcDailyCandles, funding] = await Promise.all([
+      getCandles(instId, bar, 220),
+      getTicker(instId),
+      getCandles(instId, '1D', 160).catch(()=>null),
+      getCandles('BTC-USDT-SWAP', bar, 140).catch(()=>null),
+      getCandles('BTC-USDT-SWAP', '1D', 160).catch(()=>null),
+      getFundingRate(toSwapInstId(instId)).catch(()=>null)
+    ]);
+    const btcBias = btcCandles ? classifyBtcBias(btcCandles, btcDailyCandles) : null;
+    const analysis = analyzeFromCandles(instId, candles, ticker, {btcBias, dailyCandles, funding});
     lastAnalysis = analysis;
     renderAnalysis(analysis);
     setStatus(`分析完成：${instId}｜資料來源 OKX Public API｜${bar} K 線`);
@@ -251,8 +365,8 @@ function renderAnalysis(a){
 }
 function simpleText(a){
   if(a.market==='spot' && a.side==='SHORT') return '現貨沒有做空按鈕。偏空時不要買；如果你已經持有，可以參考現貨參數分批賣出或設止損。';
-  if(a.side==='LONG') return '目前偏多，可以等待價格落在進場區附近，再用止損控制風險。不要看到綠色就重倉追高。';
-  if(a.side==='SHORT') return '目前偏空，可以觀察合約做空；新手一定要用逐倉和止損，避免反彈造成大虧。';
+  if(a.side==='LONG') return a.smallMode ? '小本金保守模式已通過：偏多、風險可控、BTC 大盤沒有明顯反向。仍要等價格進入進場區，不要市價追單。' : '目前偏多，可以等待價格落在進場區附近，再用止損控制風險。不要看到綠色就重倉追高。';
+  if(a.side==='SHORT') return a.smallMode ? '小本金保守模式已通過：偏空、風險可控、沒有追在過度下跌的位置。合約做空一定用逐倉與止損。' : '目前偏空，可以觀察合約做空；新手一定要用逐倉和止損，避免反彈造成大虧。';
   return '目前建議等待，不交易。方向不夠明確或風險條件不漂亮時，空手就是最安全的策略。';
 }
 function renderPlan(a){
@@ -325,9 +439,9 @@ function renderOkxParams(a){
     ['預估保證金', `${fmtPrice(p.margin)} USDT`, '實際以 OKX 顯示為準'],
     ['止盈止損', '勾選', '一定要設定，不要裸單'],
     ['止損觸發價', fmtPrice(p.stop), '委託價建議選市價'],
-    ['TP1 止盈', `${fmtPrice(p.tp1)}｜出 30%`, '先保護利潤'],
-    ['TP2 止盈', `${fmtPrice(p.tp2)}｜再出 30%`, '達到後可把止損移到進場價'],
-    ['TP3 止盈', `${fmtPrice(p.tp3)}｜出 40%`, '最後一段吃趨勢'],
+    ['TP1 止盈', `${fmtPrice(p.tp1)}｜出 ${Math.round((p.shares?.[0]||0.3)*100)}%`, '先保護利潤'],
+    ['TP2 止盈', `${fmtPrice(p.tp2)}｜再出 ${Math.round((p.shares?.[1]||0.3)*100)}%`, '達到後可把止損移到進場價'],
+    ['TP3 止盈', `${fmtPrice(p.tp3)}｜出 ${Math.round((p.shares?.[2]||0.4)*100)}%`, '最後一段吃趨勢'],
     ['移動止盈止損', `回調幅度 ${p.trailingCallback}%`, '不懂可以先不用，會用後再開']
   ];
 
@@ -338,9 +452,9 @@ function renderOkxParams(a){
     ['買入價格', `${fmtPrice(p.entryLow)} - ${fmtPrice(p.entryHigh)}`, '價格到這區間再買'],
     ['買入金額', `${fmtPrice(Math.min(p.notional, a.account*0.35))} USDT`, '新手單一幣最多先用帳戶 35% 以內'],
     ['止損價', fmtPrice(p.stop), '跌破代表判斷錯誤'],
-    ['TP1 賣出', `${fmtPrice(p.tp1)}｜賣 30%`, '可用限價賣單'],
-    ['TP2 賣出', `${fmtPrice(p.tp2)}｜賣 30%`, '分批收利潤'],
-    ['TP3 賣出', `${fmtPrice(p.tp3)}｜賣 40%`, '留最後一段'],
+    ['TP1 賣出', `${fmtPrice(p.tp1)}｜賣 ${Math.round((p.shares?.[0]||0.3)*100)}%`, '可用限價賣單'],
+    ['TP2 賣出', `${fmtPrice(p.tp2)}｜賣 ${Math.round((p.shares?.[1]||0.3)*100)}%`, '分批收利潤'],
+    ['TP3 賣出', `${fmtPrice(p.tp3)}｜賣 ${Math.round((p.shares?.[2]||0.4)*100)}%`, '留最後一段'],
     ['現貨提醒', '不能做空', '偏空時不要買，已持倉才考慮賣出']
   ] : [
     ['交易對', spotId, 'OKX 現貨搜尋這個名稱'],
@@ -363,9 +477,17 @@ function renderOkxParams(a){
 function renderReasons(reasons){ $('reasons').innerHTML = reasons.map(r=>`<li>${escapeHtml(r)}</li>`).join(''); }
 function renderMetrics(a){
   const rows = [
-    ['交易類型', a.market==='spot'?'現貨':'USDT 永續合約'], ['現價', fmtUSD(a.price)], ['24H 漲跌', fmtPct(a.ticker.change24h)],
+    ['策略版本', a.smallMode?'Pro Conservative v2':'一般'],
+    ['BTC 濾網', a.btcBias?.text || '未取得'],
+    ['日線方向', a.htfBias || 'NEUTRAL'],
+    ['交易類型', a.market==='spot'?'現貨':'USDT 永續合約'],
+    ['現價', fmtUSD(a.price)], ['24H 漲跌', fmtPct(a.ticker.change24h)],
     ['SMA20', fmtUSD(a.sma20)], ['SMA50', fmtUSD(a.sma50)],
-    ['RSI14', Number.isFinite(a.rsi14)?a.rsi14.toFixed(1):'—'], ['ATR14', `${fmtUSD(a.atr14)}｜${a.atrPct.toFixed(2)}%`],
+    ['RSI14', Number.isFinite(a.rsi14)?a.rsi14.toFixed(1):'—'],
+    ['ADX14', Number.isFinite(a.adx14)?a.adx14.toFixed(1):'—'],
+    ['均線距離', Number.isFinite(a.maGapPct)?`${a.maGapPct.toFixed(2)}%`:'—'],
+    ['ATR14', `${fmtUSD(a.atr14)}｜${Number.isFinite(a.atrPct)?a.atrPct.toFixed(2):'—'}%`],
+    ['資金費率', Number.isFinite(a.fundingRatePct)?fmtPct(a.fundingRatePct):'—'],
     ['支撐', fmtUSD(a.lvls.support)], ['壓力', fmtUSD(a.lvls.resistance)],
     ['10 根 K 趨勢', fmtPct(a.trend10)], ['成交量比', Number.isFinite(a.volR)?`${a.volR.toFixed(2)}x`:'—']
   ];
@@ -408,7 +530,7 @@ function simulateOneTrade(signal, futureCandles, maxHold){
   const entry = futureCandles[0].open;
   const stop = p.stop;
   const targets = [p.tp1, p.tp2, p.tp3];
-  const shares = [0.3, 0.3, 0.4];
+  const shares = p.shares || [0.3, 0.3, 0.4];
   const qty = p.qtyCoin;
   const riskCash = signal.account * signal.riskPct;
   const feeRate = signal.market === 'swap' ? 0.0005 : 0.001;
@@ -576,9 +698,9 @@ function oneLineTicket(a){
     `限價 ${fmtPrice(p.entryLow)}-${fmtPrice(p.entryHigh)}`,
     `數量 ${fmtPrice(p.notional)} USDT`,
     `SL ${fmtPrice(p.stop)}`,
-    `TP1 ${fmtPrice(p.tp1)} 出30%`,
-    `TP2 ${fmtPrice(p.tp2)} 出30%`,
-    `TP3 ${fmtPrice(p.tp3)} 出40%`
+    `TP1 ${fmtPrice(p.tp1)} 出${Math.round((p.shares?.[0]||0.3)*100)}%`,
+    `TP2 ${fmtPrice(p.tp2)} 出${Math.round((p.shares?.[1]||0.3)*100)}%`,
+    `TP3 ${fmtPrice(p.tp3)} 出${Math.round((p.shares?.[2]||0.4)*100)}%`
   ].join('｜');
 }
 function setupOkxQuickActions(a){
@@ -606,13 +728,15 @@ function setupOkxQuickActions(a){
 function recommendationScore(a){
   if(a.error) return -999;
   if(!a.plan) return Math.max(a.long||0, a.short||0) - 45;
-  const directionScore = Math.max(a.long||0, a.short||0);
-  const rrBonus = (a.plan.rr || 0) * 8;
+  const dirScore = a.side === 'LONG' ? a.long : a.short;
+  const riskPenalty = a.plan ? Math.max(0, a.plan.stopPct - 2.5) * 5 : 30;
+  const volPenalty = Number.isFinite(a.atrPct) ? Math.max(0, a.atrPct - 3.8) * 2 : 20;
+  const trendBonus = Number.isFinite(a.adx14) ? Math.min(6, Math.max(0, a.adx14 - PRO_CONFIG.minAdx) * 0.35) : 0;
+  const fundingPenalty = Number.isFinite(a.fundingRatePct) ? Math.max(0, Math.abs(a.fundingRatePct) - 0.03) * 80 : 0;
   const sim = runSimulation(a);
-  const simBonus = sim.trades.length ? Math.max(-18, Math.min(18, sim.avgR * 10 + (sim.winRate - 50) / 4)) : -4;
-  const waitPenalty = a.side === 'WAIT' ? -35 : 0;
+  const simBonus = sim.trades.length ? Math.max(-10, Math.min(10, sim.avgR * 6 + (sim.winRate - 50) / 6)) : -4;
   const spotShortPenalty = a.market === 'spot' && a.side === 'SHORT' ? -40 : 0;
-  return directionScore + rrBonus + simBonus + waitPenalty + spotShortPenalty;
+  return dirScore + trendBonus + simBonus + (a.volR >= 1 ? 4 : 0) - riskPenalty - volPenalty - fundingPenalty - spotShortPenalty;
 }
 function renderTopPicks(results){
   const box = $('topPicks');
@@ -654,12 +778,19 @@ async function scanTopPicks(silent=false){
   const bar = $('barSelect').value;
   const symbols = currentSymbols();
   const results = [];
+  const [btcCandles, btcDailyCandles] = await Promise.all([
+    getCandles('BTC-USDT-SWAP', bar, 140).catch(()=>null),
+    getCandles('BTC-USDT-SWAP', '1D', 160).catch(()=>null)
+  ]);
+  const btcBias = btcCandles ? classifyBtcBias(btcCandles, btcDailyCandles) : null;
   for(let i=0;i<symbols.length;i++){
     const [instId,name] = symbols[i];
     try{
       if(!silent) setStatus(`Top 3 掃描中 ${i+1}/${symbols.length}：${instId}`);
-      const [candles,ticker] = await Promise.all([getCandles(instId, bar, 200), getTicker(instId)]);
-      const a = analyzeFromCandles(instId, candles, ticker);
+      const [candles,ticker,dailyCandles,funding] = await Promise.all([
+        getCandles(instId, bar, 220), getTicker(instId), getCandles(instId, '1D', 160).catch(()=>null), getFundingRate(toSwapInstId(instId)).catch(()=>null)
+      ]);
+      const a = analyzeFromCandles(instId, candles, ticker, {btcBias, dailyCandles, funding});
       results.push({rank:i+1,name,...a});
       await sleep(70);
     }catch(err){ results.push({rank:i+1,name,instId,error:err.message||String(err)}); }
@@ -677,12 +808,19 @@ async function scanSymbols(){
   body.innerHTML = '';
   setStatus(`正在掃描 OKX ${$('marketSelect').value==='spot'?'現貨':'合約'}主流幣，請稍候...`);
   const results=[];
+  const [btcCandles, btcDailyCandles] = await Promise.all([
+    getCandles('BTC-USDT-SWAP', bar, 140).catch(()=>null),
+    getCandles('BTC-USDT-SWAP', '1D', 160).catch(()=>null)
+  ]);
+  const btcBias = btcCandles ? classifyBtcBias(btcCandles, btcDailyCandles) : null;
   for(let i=0;i<symbols.length;i++){
     const [instId,name]=symbols[i];
     setStatus(`掃描中 ${i+1}/${symbols.length}：${instId}`);
     try{
-      const [candles,ticker] = await Promise.all([getCandles(instId, bar, 200), getTicker(instId)]);
-      const a = analyzeFromCandles(instId, candles, ticker);
+      const [candles,ticker,dailyCandles,funding] = await Promise.all([
+        getCandles(instId, bar, 220), getTicker(instId), getCandles(instId, '1D', 160).catch(()=>null), getFundingRate(toSwapInstId(instId)).catch(()=>null)
+      ]);
+      const a = analyzeFromCandles(instId, candles, ticker, {btcBias, dailyCandles, funding});
       results.push({rank:i+1,name,...a});
       await sleep(80);
     }catch(err){
@@ -713,6 +851,14 @@ function renderScanRow(r,idx){
 }
 function escapeHtml(str){ return String(str).replace(/[&<>'"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 
+function applyStrategyDefaults(){
+  if(!isSmallMode()) return;
+  if($('riskSelect')) $('riskSelect').value = '0.005';
+  if($('leverageSelect')) $('leverageSelect').value = '1';
+  if($('rrSelect')) $('rrSelect').value = '2';
+  if($('modeSelect')) $('modeSelect').value = 'conservative';
+  if($('barSelect')) $('barSelect').value = '4H';
+}
 function updateSymbolOptions(){
   const oldBase = baseCoin($('symbolSelect').value || 'BTC-USDT-SWAP');
   const symbols = currentSymbols();
@@ -724,6 +870,7 @@ function updateSymbolOptions(){
   $('leverageSelect').title = isSpot ? '現貨沒有槓桿' : '';
 }
 function init(){
+  applyStrategyDefaults();
   updateSymbolOptions();
   $('marketSelect').addEventListener('change',()=>{ updateSymbolOptions(); if(lastAnalysis) analyzeSelected(); });
   $('symbolSelect').addEventListener('change',()=>{ if(lastAnalysis) analyzeSelected(); });
@@ -752,8 +899,9 @@ function init(){
     }
   });
   ['accountInput','riskSelect','leverageSelect','rrSelect','modeSelect','barSelect'].forEach(id=>$(id).addEventListener('change',()=>{ if(lastAnalysis) analyzeSelected(); }));
+  $('strategyModeSelect')?.addEventListener('change',()=>{ applyStrategyDefaults(); if(lastAnalysis) analyzeSelected(); });
   setupOkxQuickActions(null);
-  setStatus('準備完成。合約建議用逐倉、4H、1% 風險、2x 槓桿；現貨沒有做空，偏空就不買。');
+  setStatus('準備完成。小本金保守模式：逐倉、4H、0.5% 風險、1x 槓桿，只做 A 級機會；現貨偏空就不買。');
   setTimeout(()=>scanTopPicks(true).catch(console.error), 500);
 }
 init();

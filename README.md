@@ -22,6 +22,45 @@
 5. Branch 選 main，資料夾選 `/root`
 6. 等待 GitHub 產生網址
 
+
+## Pro Conservative v2 同步策略
+
+這版已把 GitHub Pages 網站與 Cloudflare Worker 的策略同步，避免 Telegram 推播和網站分析出現不同結論。
+
+同步內容：
+
+- 只使用 OKX 已收線 K 線，降低未收線假訊號
+- BTC 4H + 1D 大盤濾網
+- 單幣 1D 日線方向確認
+- ADX 趨勢強度過濾，盤整時不提醒
+- SMA20 / SMA50 糾纏過濾
+- 資金費率過濾，避免合約持倉成本太高
+- 進場價改成回踩區，不追即時價
+- Top 3 排序與 Worker 的評分邏輯一致
+- Worker KV 去重 key 使用：幣種 + 方向 + 週期
+
+建議設定：
+
+```toml
+BAR = "4H"
+RISK_PCT = "0.005"
+LEVERAGE = "1"
+MIN_RR = "2"
+MIN_SCORE = "82"
+MIN_ADX = "16"
+MAX_STOP_PCT = "3.2"
+FUNDING_LIMIT_PCT = "0.06"
+DEDUPE_TTL_SECONDS = "43200"
+```
+
+Cloudflare Worker 的 KV binding 請使用：
+
+```toml
+[[kv_namespaces]]
+binding = "SIGNAL_KV"
+id = "你的 KV namespace id"
+```
+
 ## 風險提醒
 
 本工具只做技術分析與歷史模擬輔助，不是投資建議，也不能保證獲利。回測結果不代表未來結果。合約、槓桿與加密貨幣交易可能造成快速虧損。請務必使用止損並控制單筆風險。
@@ -37,3 +76,44 @@
 ### 為什麼不能直接從 GitHub Pages 自動下單？
 
 GitHub Pages 是純前端靜態網站。如果把 OKX API Key 放在前端，任何人都能看到你的金鑰，風險很高。因此本網站只做「參數產生、複製、開啟 OKX」。如果未來要做真正一鍵下單，應改成後端或 Cloudflare Worker，並加上簽名、權限、二次確認與風控限制。
+
+## 本版新增：小本金保守模式
+
+預設參數：
+
+- 4H K 線
+- 單筆風險 0.5%
+- 合約 1x 槓桿
+- TP1 出 50%，TP2 出 30%，TP3 出 20%
+- 只顯示 A 級機會
+- BTC 大盤不配合時不推薦山寨幣逆勢交易
+
+## 自動交易
+
+本專案的 GitHub Pages 版本不會保存 API Key，也不會直接自動下單。若要不用看盤，可以參考 `AUTO_TRADING.md`：
+
+1. 半自動通知：最推薦
+2. 全自動交易：需後端與嚴格風控
+
+---
+
+## 階段 2：Telegram 自動提醒
+
+這版已新增 `cloudflare-worker/` 資料夾，可部署到 Cloudflare Worker，讓系統每 4 小時收線後 5 分鐘自動掃描 OKX，出現小本金保守模式 A 級訊號時發 Telegram 通知。
+
+詳細教學請看：
+
+```text
+STAGE2_TELEGRAM_ALERTS.md
+```
+
+核心流程：
+
+```text
+Cloudflare Worker 定時掃描 OKX
+→ 最多挑出 Top 3 A 級訊號
+→ 發 Telegram 通知
+→ 你到 OKX 手動確認下單
+```
+
+這版沒有自動下單，不需要 OKX API Key，也不要把任何交易所 API Key 放進 GitHub Pages。

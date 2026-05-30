@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI OKX 工業風下單參數助手 Pro</title>
+  <title>AI OKX Pro Conservative v2 交易助手</title>
   <meta name="description" content="OKX 新手下單參數助手：合約與現貨分開顯示，直接對應 OKX 欄位、進場、止損、止盈、倉位與風險。" />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
@@ -14,8 +14,8 @@
     <div class="brand">
       <div class="logo">OKX</div>
       <div>
-        <strong>AI OKX 工業風下單參數助手 Pro</strong>
-        <span>Command Center｜先挑機會，再照 OKX 欄位下單</span>
+        <strong>AI OKX Pro Conservative v2 交易助手</strong>
+        <span>Pro Conservative v2｜網站與 Telegram Worker 同步策略</span>
       </div>
     </div>
     <button id="refreshBtn" class="ghost">↻ 重新分析</button>
@@ -28,10 +28,17 @@
           <span>Control</span>
           <h2>選擇交易設定</h2>
         </div>
-        <small>新手預設：合約、4H、1% 風險、2x 槓桿</small>
+        <small>Pro v2 預設：4H 已收線、日線確認、BTC 濾網、ADX、資金費率、只做 A 級機會</small>
       </div>
 
       <div class="settings-grid">
+        <div class="field wide">
+          <label for="strategyModeSelect">策略模式</label>
+          <select id="strategyModeSelect">
+            <option value="small" selected>Pro Conservative v2｜只做 A 級，0.5% 風險，1x 槓桿</option>
+            <option value="normal">一般模式｜訊號較多，但風險較高</option>
+          </select>
+        </div>
         <div class="field wide">
           <label for="marketSelect">交易類型</label>
           <select id="marketSelect">
@@ -60,21 +67,21 @@
         </div>
         <div class="field">
           <label for="accountInput">帳戶資金 USDT</label>
-          <input id="accountInput" type="number" value="1000" min="10" step="10" />
+          <input id="accountInput" type="number" value="100" min="10" step="10" />
         </div>
         <div class="field">
           <label for="riskSelect">單筆最大虧損</label>
           <select id="riskSelect">
-            <option value="0.005">0.5%｜非常保守</option>
-            <option value="0.01" selected>1%｜新手建議</option>
+            <option value="0.005" selected>0.5%｜小本金建議</option>
+            <option value="0.01">1%｜新手上限</option>
             <option value="0.02">2%｜風險較高</option>
           </select>
         </div>
         <div class="field">
           <label for="leverageSelect">槓桿倍數</label>
           <select id="leverageSelect">
-            <option value="1">1x｜最保守</option>
-            <option value="2" selected>2x｜新手上限建議</option>
+            <option value="1" selected>1x｜小本金建議</option>
+            <option value="2">2x｜新手上限建議</option>
             <option value="3">3x｜需嚴格止損</option>
             <option value="5">5x｜不建議新手</option>
           </select>
@@ -141,9 +148,9 @@
           <div><small>方向</small><strong id="sideOut">—</strong></div>
           <div><small>進場區</small><strong id="entryOut">—</strong></div>
           <div><small>止損</small><strong id="stopOut">—</strong></div>
-          <div><small>TP1 出 30%</small><strong id="tp1Out">—</strong></div>
+          <div><small>TP1 出 50%</small><strong id="tp1Out">—</strong></div>
           <div><small>TP2 出 30%</small><strong id="tp2Out">—</strong></div>
-          <div><small>TP3 出 40%</small><strong id="tp3Out">—</strong></div>
+          <div><small>TP3 出 20%</small><strong id="tp3Out">—</strong></div>
           <div><small>風險報酬</small><strong id="rrOut">—</strong></div>
           <div><small>建議倉位</small><strong id="positionOut">—</strong></div>
           <div><small>需要保證金</small><strong id="marginOut">—</strong></div>
@@ -264,8 +271,26 @@
       </section>
     </details>
 
+
+
+    <section class="automation-card">
+      <div class="section-title">
+        <div>
+          <span>Automation</span>
+          <h2>不用看盤的自動交易方式</h2>
+          <p>GitHub Pages 這個前端網站只負責分析與產生參數；真正自動下單必須放在安全後端，不能把 OKX API Key 寫在網頁裡。</p>
+        </div>
+      </div>
+      <div class="automation-grid">
+        <div class="auto-step safe"><strong>目前安全版</strong><span>網站挑 Top 3 → 複製參數 → 你到 OKX 手動確認。</span></div>
+        <div class="auto-step"><strong>半自動版</strong><span>Cloudflare Worker 定時掃描 → Telegram/Line 通知你 → 你手動下單。</span></div>
+        <div class="auto-step danger"><strong>全自動版</strong><span>Cloudflare Worker / VPS 儲存 API Key → 依策略自動下單、止盈、止損。新手不建議直接用真錢。</span></div>
+      </div>
+      <p class="automation-warning">重要：API Key 只能放後端或本機機器人，權限只開 Read + Trade，不開 Withdraw，最好綁定固定 IP、使用 OKX 子帳戶與小額資金。</p>
+    </section>
+
     <section class="disclaimer">
-      <strong>風險提醒：</strong>這是技術分析輔助工具，不是投資建議，也不能保證獲利。OKX 合約和槓桿會放大虧損。任何交易都必須先設止損，且單筆風險不要超過自己能承受的範圍。
+      <strong>風險提醒：</strong>這是小本金保守型技術分析輔助工具，不是投資建議，也不能保證獲利。OKX 合約和槓桿會放大虧損。任何交易都必須先設止損，且單筆風險不要超過自己能承受的範圍。
     </section>
   </main>
 </body>
