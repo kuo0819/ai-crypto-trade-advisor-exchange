@@ -247,6 +247,7 @@ function renderAnalysis(a){
   renderMetrics(a);
   renderChart(a);
   renderSimulation(a);
+  setupOkxQuickActions(a);
 }
 function simpleText(a){
   if(a.market==='spot' && a.side==='SHORT') return '現貨沒有做空按鈕。偏空時不要買；如果你已經持有，可以參考現貨參數分批賣出或設止損。';
@@ -558,6 +559,116 @@ function renderSimulation(a){
   ].join('\n');
 }
 
+
+function okxTradeUrl(instId, market){
+  const path = market === 'spot' ? 'trade-spot' : 'trade-swap';
+  return `https://www.okx.com/trade-${market === 'spot' ? 'spot' : 'swap'}/${String(instId).toLowerCase()}`;
+}
+function oneLineTicket(a){
+  if(!a || !a.plan) return '目前等待，不建議下單。';
+  const p = a.plan;
+  const action = a.market === 'spot' ? (p.side === 'LONG' ? '現貨買入' : '現貨不買/持倉賣出') : (p.side === 'LONG' ? '合約開多' : '合約開空');
+  const inst = a.market === 'spot' ? toSpotInstId(a.instId) : toSwapInstId(a.instId);
+  return [
+    `OKX ${action}`,
+    `交易對 ${inst}`,
+    a.market === 'swap' ? `逐倉 ${a.lev}x` : '現貨無槓桿',
+    `限價 ${fmtPrice(p.entryLow)}-${fmtPrice(p.entryHigh)}`,
+    `數量 ${fmtPrice(p.notional)} USDT`,
+    `SL ${fmtPrice(p.stop)}`,
+    `TP1 ${fmtPrice(p.tp1)} 出30%`,
+    `TP2 ${fmtPrice(p.tp2)} 出30%`,
+    `TP3 ${fmtPrice(p.tp3)} 出40%`
+  ].join('｜');
+}
+function setupOkxQuickActions(a){
+  const openBtn = $('openOkxBtn');
+  const copyBtn = $('copyOkxOneLineBtn');
+  if(openBtn){
+    openBtn.disabled = !a;
+    openBtn.onclick = () => {
+      const inst = a?.market === 'spot' ? toSpotInstId(a.instId) : toSwapInstId(a?.instId || $('symbolSelect').value);
+      window.open(okxTradeUrl(inst, a?.market || $('marketSelect').value), '_blank', 'noopener,noreferrer');
+    };
+  }
+  if(copyBtn){
+    copyBtn.disabled = !a;
+    copyBtn.onclick = async () => {
+      const text = oneLineTicket(a);
+      try{
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = '已複製一行參數';
+        setTimeout(()=>copyBtn.textContent='複製一行下單參數', 1200);
+      }catch{ alert(text); }
+    };
+  }
+}
+function recommendationScore(a){
+  if(a.error) return -999;
+  if(!a.plan) return Math.max(a.long||0, a.short||0) - 45;
+  const directionScore = Math.max(a.long||0, a.short||0);
+  const rrBonus = (a.plan.rr || 0) * 8;
+  const sim = runSimulation(a);
+  const simBonus = sim.trades.length ? Math.max(-18, Math.min(18, sim.avgR * 10 + (sim.winRate - 50) / 4)) : -4;
+  const waitPenalty = a.side === 'WAIT' ? -35 : 0;
+  const spotShortPenalty = a.market === 'spot' && a.side === 'SHORT' ? -40 : 0;
+  return directionScore + rrBonus + simBonus + waitPenalty + spotShortPenalty;
+}
+function renderTopPicks(results){
+  const box = $('topPicks');
+  if(!box) return;
+  const tradable = results
+    .filter(r=>!r.error && r.plan && r.side !== 'WAIT' && !(r.market === 'spot' && r.side === 'SHORT'))
+    .sort((a,b)=>recommendationScore(b)-recommendationScore(a))
+    .slice(0,3);
+  if(!tradable.length){
+    box.innerHTML = `<div class="pick-card empty"><strong>目前沒有 A 級機會</strong><span>主流幣沒有符合進場條件，網站建議等待。這不是壞事，空手也是策略。</span></div>`;
+    return;
+  }
+  box.innerHTML = tradable.map((r,idx)=>{
+    const p = r.plan;
+    const tag = r.side === 'LONG' ? '做多' : '做空';
+    const klass = r.side === 'LONG' ? 'long' : 'short';
+    const score = Math.round(recommendationScore(r));
+    return `<article class="pick-card ${klass}" data-inst="${escapeHtml(r.instId)}">
+      <div class="pick-rank">#${idx+1}</div>
+      <div class="pick-head"><strong>${escapeHtml(r.instId)}</strong><span>${escapeHtml(tag)}｜分數 ${score}</span></div>
+      <div class="pick-grid">
+        <div><small>進場區</small><b>${fmtPrice(p.entryLow)} - ${fmtPrice(p.entryHigh)}</b></div>
+        <div><small>止損</small><b>${fmtPrice(p.stop)}</b></div>
+        <div><small>TP2</small><b>${fmtPrice(p.tp2)}</b></div>
+        <div><small>倉位</small><b>${fmtPrice(p.notional)} USDT</b></div>
+      </div>
+      <p>${escapeHtml(r.reasons?.[0] || '訊號條件較完整。')}</p>
+      <button class="ghost pick-use" type="button">套用這個幣</button>
+    </article>`;
+  }).join('');
+  [...box.querySelectorAll('.pick-card[data-inst]')].forEach(card=>{
+    const use = () => { $('symbolSelect').value = card.dataset.inst; analyzeSelected(); window.scrollTo({top:0, behavior:'smooth'}); };
+    card.querySelector('.pick-use')?.addEventListener('click', use);
+  });
+}
+async function scanTopPicks(silent=false){
+  const box = $('topPicks');
+  if(box && !silent) box.innerHTML = `<div class="pick-card empty"><strong>掃描中...</strong><span>正在讀取 OKX 主流幣 K 線，最多挑出 3 個推薦觀察。</span></div>`;
+  const bar = $('barSelect').value;
+  const symbols = currentSymbols();
+  const results = [];
+  for(let i=0;i<symbols.length;i++){
+    const [instId,name] = symbols[i];
+    try{
+      if(!silent) setStatus(`Top 3 掃描中 ${i+1}/${symbols.length}：${instId}`);
+      const [candles,ticker] = await Promise.all([getCandles(instId, bar, 200), getTicker(instId)]);
+      const a = analyzeFromCandles(instId, candles, ticker);
+      results.push({rank:i+1,name,...a});
+      await sleep(70);
+    }catch(err){ results.push({rank:i+1,name,instId,error:err.message||String(err)}); }
+  }
+  renderTopPicks(results);
+  if(!silent) setStatus('Top 3 掃描完成。點「套用這個幣」可以直接帶入下單參數。');
+  return results;
+}
+
 async function scanSymbols(){
   setBusy(true);
   const bar = $('barSelect').value;
@@ -578,11 +689,8 @@ async function scanSymbols(){
       results.push({rank:i+1, name, instId, error: err.message || String(err)});
     }
   }
-  results.sort((a,b)=>{
-    const scoreA = a.error ? -1 : Math.max(a.long||0, a.short||0) + (a.side==='WAIT' ? -25 : 0);
-    const scoreB = b.error ? -1 : Math.max(b.long||0, b.short||0) + (b.side==='WAIT' ? -25 : 0);
-    return scoreB-scoreA;
-  });
+  results.sort((a,b)=> recommendationScore(b) - recommendationScore(a));
+  renderTopPicks(results);
   body.innerHTML = results.map((r,idx)=>renderScanRow(r,idx)).join('');
   [...body.querySelectorAll('tr[data-inst]')].forEach(tr=>{
     tr.addEventListener('click',()=>{ $('symbolSelect').value=tr.dataset.inst; analyzeSelected(); window.scrollTo({top:0,behavior:'smooth'}); });
@@ -622,6 +730,7 @@ function init(){
   $('analyzeBtn').addEventListener('click', analyzeSelected);
   $('refreshBtn').addEventListener('click', analyzeSelected);
   $('scanBtn').addEventListener('click', scanSymbols);
+  if($('rescanTopBtn')) $('rescanTopBtn').addEventListener('click', ()=>scanTopPicks(false));
   if($('copyTicketBtn')) $('copyTicketBtn').addEventListener('click', async ()=>{
     const text = $('copyTicketBtn').dataset.copy || '尚未產生下單參數';
     try{
@@ -643,6 +752,8 @@ function init(){
     }
   });
   ['accountInput','riskSelect','leverageSelect','rrSelect','modeSelect','barSelect'].forEach(id=>$(id).addEventListener('change',()=>{ if(lastAnalysis) analyzeSelected(); }));
+  setupOkxQuickActions(null);
   setStatus('準備完成。合約建議用逐倉、4H、1% 風險、2x 槓桿；現貨沒有做空，偏空就不買。');
+  setTimeout(()=>scanTopPicks(true).catch(console.error), 500);
 }
 init();

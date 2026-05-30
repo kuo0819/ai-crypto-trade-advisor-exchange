@@ -183,3 +183,55 @@ select option:disabled{
 .sim-table-wrap table{min-width:820px}
 @media(max-width:1100px){.sim-summary{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:680px){.sim-summary{grid-template-columns:1fr}}
+
+/* Top 3 recommendation deck */
+.recommend-card{
+  padding:22px;
+  margin-bottom:18px;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.028)),
+    radial-gradient(circle at 12% 0%,rgba(245,158,11,.14),transparent 36%),
+    linear-gradient(135deg,rgba(53,208,127,.055),transparent 42%);
+  border:1px solid rgba(245,158,11,.28);
+  border-top-color:rgba(255,255,255,.18);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  position:relative;
+  overflow:hidden;
+}
+.recommend-card::before{
+  content:"";position:absolute;left:0;right:0;top:0;height:4px;
+  background:repeating-linear-gradient(135deg,#f59e0b 0 10px,#111 10px 20px,#35d07f 20px 30px,#111 30px 40px);
+  opacity:.88;
+}
+.top-picks{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.pick-card{
+  position:relative;
+  min-height:230px;
+  padding:18px;
+  border-radius:18px;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.06),rgba(0,0,0,.22)),
+    linear-gradient(135deg,rgba(245,158,11,.08),transparent 45%);
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
+  overflow:hidden;
+}
+.pick-card.long{border-color:rgba(53,208,127,.34)}
+.pick-card.short{border-color:rgba(224,82,99,.36)}
+.pick-card.empty{grid-column:1 / -1;min-height:110px;display:flex;flex-direction:column;justify-content:center;gap:8px;color:#d6cfbf}
+.pick-rank{
+  position:absolute;right:14px;top:12px;
+  font-family:"SFMono-Regular",Consolas,monospace;
+  font-weight:950;color:rgba(245,158,11,.9);font-size:22px;
+}
+.pick-head{padding-right:48px;margin-bottom:12px}.pick-head strong{display:block;font-size:20px;letter-spacing:.01em}.pick-head span{display:block;color:var(--muted);font-weight:900;font-size:13px;margin-top:4px}
+.pick-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}.pick-grid div{background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:10px}.pick-grid small{display:block;color:var(--muted);font-size:11px;font-weight:950}.pick-grid b{display:block;color:#fff4dd;font-family:"SFMono-Regular",Consolas,monospace;font-size:13px;margin-top:3px}.pick-card p{color:#cabfae;margin:0 0 12px;font-size:13px;line-height:1.45}.pick-use{width:100%;padding:10px 12px}
+.okx-action-bar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-top:16px;padding:14px;border-radius:16px;
+  background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.22);
+}
+.okx-action-bar small{color:#d7c9af;font-weight:800;flex:1;min-width:260px}
+@media(max-width:1100px){.top-picks{grid-template-columns:1fr}.pick-card.empty{grid-column:auto}}
+@media(max-width:680px){.okx-action-bar{align-items:stretch;flex-direction:column}.okx-action-bar small{min-width:0}.top-picks{grid-template-columns:1fr}}

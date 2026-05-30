@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI OKX 工業風下單參數助手</title>
+  <title>AI OKX 工業風下單參數助手 Pro</title>
   <meta name="description" content="OKX 新手下單參數助手：合約與現貨分開顯示，直接對應 OKX 欄位、進場、止損、止盈、倉位與風險。" />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
@@ -14,8 +14,8 @@
     <div class="brand">
       <div class="logo">OKX</div>
       <div>
-        <strong>AI OKX 工業風下單參數助手</strong>
-        <span>Command Center｜先看結論，再照欄位下單</span>
+        <strong>AI OKX 工業風下單參數助手 Pro</strong>
+        <span>Command Center｜先挑機會，再照 OKX 欄位下單</span>
       </div>
     </div>
     <button id="refreshBtn" class="ghost">↻ 重新分析</button>
@@ -96,6 +96,21 @@
       <div id="status" class="status">準備完成，請按「分析這個幣種」。</div>
     </section>
 
+    <section class="recommend-card">
+      <div class="section-title">
+        <div>
+          <span>Priority Scan</span>
+          <h2>今日優先觀察 Top 3</h2>
+          <p>先掃描 OKX 主流幣，最多只列出 3 個最值得觀察的機會。若沒有好機會，會直接顯示等待。</p>
+        </div>
+        <button id="rescanTopBtn" class="ghost">重新掃描 Top 3</button>
+      </div>
+      <div id="topPicks" class="top-picks">
+        <div class="pick-card empty"><strong>尚未掃描</strong><span>開啟網站後會自動掃描，也可以手動按「重新掃描 Top 3」。</span></div>
+      </div>
+    </section>
+
+
     <section class="decision-layout">
       <article class="decision-panel">
         <div class="section-title compact">
@@ -146,6 +161,11 @@
         <button id="copyTicketBtn" class="ghost">複製參數</button>
       </div>
       <div id="mainTicket" class="order-ticket-list"></div>
+      <div class="okx-action-bar">
+        <button id="openOkxBtn" class="primary">開啟 OKX 交易頁</button>
+        <button id="copyOkxOneLineBtn" class="secondary">複製一行下單參數</button>
+        <small>安全限制：網站只幫你複製與開啟 OKX，不會自動下單。下單前請你在 OKX 再確認一次。</small>
+      </div>
     </section>
 
     <section class="sim-card">
