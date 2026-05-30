@@ -108,3 +108,27 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 
 @media(max-width:1100px){.settings-grid{grid-template-columns:repeat(2,1fr)}.decision-layout,.two-column,.explain-grid{grid-template-columns:1fr}.order-ticket-list{grid-template-columns:repeat(2,1fr)}.metrics{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:680px){.topbar{align-items:flex-start;flex-direction:column}.settings-grid,.field.wide,.risk-grid,.order-ticket-list,.order-ticket-list.compact-list,.metrics,.mini-scores{grid-template-columns:1fr}.field.wide{grid-column:auto}.action-row{flex-direction:column}.primary,.secondary{width:100%}.section-title{display:block}.section-title small{text-align:left;display:block;margin-top:6px}.decision-panel h1{font-size:24px}.app-shell{padding-left:12px;padding-right:12px}.param-row{min-height:auto}}
+
+/* Fix native select dropdown readability on GitHub Pages / browsers */
+:root{color-scheme:dark;}
+select{
+  color-scheme:dark;
+  background-color:#0b0c0a;
+  color:#f7f3e8;
+  -webkit-text-fill-color:#f7f3e8;
+}
+select option,
+select optgroup{
+  background:#11130f;
+  color:#f7f3e8;
+}
+select option:checked,
+select option:hover,
+select option:focus{
+  background:#f59e0b;
+  color:#11100c;
+}
+select option:disabled{
+  background:#1a1b16;
+  color:#8f8878;
+}
